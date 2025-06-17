@@ -30,10 +30,9 @@ def soft_top_k(candidates: List, select: int = 1, decay_rate: float = 1.5) -> Li
 
     return [candidates[i] for i in selected_indices]  # return selected candidates
 
-def train_sgd_batch(model, trainset, testset, train_batch: int = 64, test_batch: int = 128, device: torch.device = "cuda", epochs: int = 128,
-                    pruning_strategy: mask.Pruning = mask.NullPruning(), regrowth_strategy: mask.Regrowth = mask.NullRegrowth(), learning_rate: float = 0.01, minibatch_budget: int = 256):
-    train_loader = DataLoader(trainset, batch_size=train_batch, shuffle=True, num_workers=2, pin_memory=True)
-    test_loader = DataLoader(testset, batch_size=test_batch, shuffle=False, num_workers=2, pin_memory=True)
+def train_sgd_batch(model: torch.nn.Module, train_loader: DataLoader, test_loader: DataLoader,
+                    warmup_strategy: mask.Warmup = mask.NullWarmup(), pruning_strategy: mask.Pruning = mask.NullPruning(), regrowth_strategy: mask.Regrowth = mask.NullRegrowth(),
+                    device: torch.device = "cuda", epochs: int = 128, learning_rate: float = 0.01, minibatch_budget: int = 256):
 
     model.train()
     model.to(device)
@@ -45,7 +44,7 @@ def train_sgd_batch(model, trainset, testset, train_batch: int = 64, test_batch:
     for epoch in range(epochs):
         model.train()
 
-        mask.update_mask(model, pruning_strategy, regrowth_strategy)
+        model = mask.update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
 
         # TODO for debugging mask update rules
         # for name, param in model.named_parameters():
@@ -75,10 +74,9 @@ def train_sgd_batch(model, trainset, testset, train_batch: int = 64, test_batch:
 
     return model
 
-def train_ea_batch(model_factory, trainset, testset, train_batch: int = 64, test_batch: int = 128, device: torch.device = "cuda", generations: int = 128,
-                   pruning_strategy: mask.Pruning = mask.NullPruning(), regrowth_strategy: mask.Regrowth = mask.NullRegrowth(), learning_rate: float = 0.01, minibatch_budget: int = 256, offspring: int = 10):
-    train_loader = DataLoader(trainset, batch_size=train_batch, shuffle=True, num_workers=2, pin_memory=True)
-    test_loader = DataLoader(testset, batch_size=test_batch, shuffle=False, num_workers=2, pin_memory=True)
+def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoader,
+                   warmup_strategy: mask.Warmup = mask.NullWarmup(), pruning_strategy: mask.Pruning = mask.NullPruning(), regrowth_strategy: mask.Regrowth = mask.NullRegrowth(),
+                   device: torch.device = "cuda", generations: int = 128, offspring: int = 10, learning_rate: float = 0.01, minibatch_budget: int = 256):
     criterion = torch.nn.CrossEntropyLoss()
 
     best_model = model_factory().to(device)
@@ -93,7 +91,7 @@ def train_ea_batch(model_factory, trainset, testset, train_batch: int = 64, test
             child = model_factory().to(device)
             child.load_state_dict(best_model.state_dict())
 
-            mask.update_mask(child, pruning_strategy, regrowth_strategy)
+            child = mask.update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
             child.train()
 
             child.index = idx + 1
@@ -128,7 +126,7 @@ def train_ea_batch(model_factory, trainset, testset, train_batch: int = 64, test
 
     return best_model
 
-def load_dataset() -> (DataLoader, DataLoader):
+def load_cifar10(train_batch: int = 32, test_batch: int = 512) -> (DataLoader, DataLoader):
     transform = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
@@ -138,26 +136,30 @@ def load_dataset() -> (DataLoader, DataLoader):
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
     testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
 
-    return trainset, testset
+    train_loader = DataLoader(trainset, batch_size=train_batch, shuffle=True, num_workers=2, pin_memory=True)
+    test_loader = DataLoader(testset, batch_size=test_batch, shuffle=False, num_workers=2, pin_memory=True)
+
+    return train_loader, test_loader
 
 if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     seed = torch.rand(1).item()
-    sparsity = 0.5
-    train_batch = 32
-    test_batch = 512
+    sparsity = 0.995
     epochs = 50000
     offspring = 10
 
+    torch.manual_seed(seed)
+    train_loader, test_loader = load_cifar10(train_batch=32, test_batch=512)
+
+    warmup_strategy = mask.NullWarmup() #mask.GradientWarmup(dataset=train_loader, minibatch_budget=64) # warmup will be used for eg gradient regrowth
     pruning_strategy = mask.MagnitudePruning(pruned_fraction=0.3)
     regrowth_strategy = mask.UniformRegrowth()
 
-    torch.manual_seed(seed)
-    train_loader, test_loader = load_dataset()
+
 
     # model_factory = lambda: SparseCNN(in_channels=3, num_classes=10, num_blocks=5, hidden_channels=128, sparsity=sparsity)
     model_factory = lambda: SparseANN(3*32*32, 500, 3, sparsity=sparsity, layernorm=True)
 
-    # train_sgd_batch(model_factory(), train_loader, test_loader, train_batch=train_batch, test_batch=test_batch, device=device, epochs=epochs, pruning_strategy=pruning_strategy, regrowth_strategy=regrowth_strategy)
-    train_ea_batch(model_factory, train_loader, test_loader, train_batch=train_batch, test_batch=test_batch, device=device, generations=epochs, offspring=offspring, pruning_strategy=pruning_strategy, regrowth_strategy=regrowth_strategy)
+    train_sgd_batch(model_factory(), train_loader, test_loader, warmup_strategy=warmup_strategy, pruning_strategy=pruning_strategy, regrowth_strategy=regrowth_strategy, device=device, epochs=epochs)
+    # train_ea_batch(model_factory, train_loader, test_loader, warmup_strategy=warmup_strategy, pruning_strategy=pruning_strategy, regrowth_strategy=regrowth_strategy, device=device, generations=epochs, offspring=offspring)

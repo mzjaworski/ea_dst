@@ -1,4 +1,6 @@
+from torch.utils.data import DataLoader
 from abc import ABC, abstractmethod
+from itertools import cycle
 import network
 import torch
 
@@ -15,6 +17,49 @@ def soft_top_k(data: torch.Tensor, select: int = 1, decay_rate: float = 1.5) -> 
     mask[selected] = True
 
     return mask
+
+
+
+class Warmup(ABC):
+
+    @abstractmethod
+    def apply(self, model: torch.nn.Module) -> torch.nn.Module:
+        pass
+
+class NullWarmup(Warmup):
+
+    def apply(self, model: torch.nn.Module) -> torch.nn.Module:
+        return model
+
+class GradientWarmup(Warmup): # used eg for gradient regrowth
+
+    def __init__(self, dataset: DataLoader, minibatch_budget: int = 256):
+        self.dataset = dataset
+        self.minibatch_budget = minibatch_budget
+
+    def apply(self, model: torch.nn.Module) -> torch.nn.Module:
+        model.train()
+
+        # zero all gradients
+        for param in model.parameters():
+            if param.grad is not None:
+                param.grad.zero_()
+
+        # accumulate gradients
+        current_device = next(model.parameters()).device
+        for batch_index, (inputs, targets) in enumerate(cycle(self.dataset)):
+            if batch_index >= self.minibatch_budget:
+                break
+
+            outputs = model(inputs.to(current_device))
+            loss = torch.nn.functional.cross_entropy(outputs, targets.to(current_device))
+            loss.backward()
+
+        model.eval()
+        return model
+
+
+
 
 class Pruning(ABC):
 
@@ -65,6 +110,8 @@ class MagnitudePruning(Pruning):
         return num_pruned, layer
 
 
+
+
 class Regrowth(ABC):
 
     @abstractmethod
@@ -101,8 +148,9 @@ class UniformRegrowth(Regrowth):
         layer.mask.data = flat_mask.view_as(mask)
         return layer
 
+def update_mask(model: torch.nn.Module, warmup_strategy: Warmup, prunning_strategy: Pruning, regrowth_strategy: Regrowth) -> torch.nn.Module:
+    model = warmup_strategy.apply(model)
 
-def update_mask(model: torch.nn.Module, prunning_strategy: Pruning, regrowth_strategy: Regrowth) -> torch.nn.Module:
     for layer in model.model:
         if not isinstance(layer, network.MaskedLayer):
             continue
