@@ -45,94 +45,6 @@ class SparseANN(torch.nn.Module):
 
         self.model = torch.nn.Sequential(*layers)
 
-    # TODO split into modules with coherent API
-    def random_mask_update(self, zeta=0.3):
-        for layer in self.model:
-            if not isinstance(layer, MaskedLayer):
-                continue
-
-            weight = layer.layer.weight.data
-            mask = layer.mask.data
-
-            flat_weight = weight.view(-1)
-            flat_mask = mask.view(-1)
-
-            active_indices = (flat_mask == 1).nonzero(as_tuple=True)[0]
-            active_weights = flat_weight[active_indices]
-
-            if active_weights.numel() == 0:
-                continue
-
-            # get magnitudes and sort from strongest to weakest
-            magnitudes = active_weights.abs()
-            sorted_magnitudes, sorted_indices = torch.sort(magnitudes, descending=True)
-
-            # linearly assign mutation probabilities: 0 (strongest) to zeta (weakest)
-            probs = torch.linspace(0, zeta, steps=len(sorted_indices))
-
-            # get actual indices in flat_weight corresponding to sorted order
-            mutation_candidates = active_indices[sorted_indices]
-
-            # draw random values to determine which neurons to mutate
-            random_vals = torch.rand_like(probs)
-            to_mutate = random_vals < probs
-
-            if to_mutate.sum() == 0:
-                continue
-
-            mutate_indices = mutation_candidates[to_mutate]
-            flat_mask[mutate_indices] = 0  # prune
-
-            # grow same number of weights randomly from inactive ones
-            inactive_indices = (flat_mask == 0).nonzero(as_tuple=True)[0]
-            num_to_grow = to_mutate.sum().item()
-            if len(inactive_indices) > 0:
-                grow_indices = inactive_indices[torch.randperm(len(inactive_indices))[:num_to_grow]]
-                flat_mask[grow_indices] = 1
-
-            # reinitialize the active weights with Gaussian noise scaled by their norm
-            updated_active_weights = flat_weight[flat_mask.bool()]
-            norm = updated_active_weights.norm() if updated_active_weights.numel() > 0 else 1.0
-            torch.nn.init.normal_(flat_weight[flat_mask.bool()], std=norm / updated_active_weights.numel() ** 0.5)
-
-            # update the mask
-            layer.mask.data = flat_mask.view_as(layer.mask)
-
-    # TODO split into modules with coherent API
-    def set_mask_update(self, zeta=0.3):
-        for layer in self.model:
-            if not isinstance(layer, MaskedLayer):
-                continue
-
-            weight = layer.layer.weight.data
-            mask = layer.mask.data
-
-            flat_weight = weight.view(-1)
-            flat_mask = mask.view(-1)
-
-            active_weights = flat_weight[flat_mask.bool()]
-            k = int(zeta * active_weights.numel())
-            if k == 0: continue
-
-            threshold = active_weights.abs().topk(k, largest=False).values.max()
-            prune_mask = (flat_weight.abs() <= threshold) & (flat_mask == 1)
-            flat_mask[prune_mask] = 0
-
-            inactive_indices = (flat_mask == 0).nonzero(as_tuple=True)[0]
-            if len(inactive_indices) > 0:
-                grow_indices = inactive_indices[torch.randperm(len(inactive_indices))[:k]]
-                flat_mask[grow_indices] = 1
-
-            # calculate the norm of the active weights
-            norm_active_weights = active_weights.norm() if active_weights.numel() > 0 else 1.0
-
-            # reinitialize the active weights with random values drawn from a Gaussian distribution
-            # and scaled by the norm of the active weights
-            torch.nn.init.normal_(flat_weight[flat_mask.bool()], std=norm_active_weights / active_weights.numel() ** 0.5)
-
-            # update the mask data
-            layer.mask.data = flat_mask.view_as(layer.mask)
-
     def forward(self, x):
         return self.model(x)
 
@@ -166,41 +78,6 @@ class SparseCNN(torch.nn.Module):
         layers.append(torch.nn.Linear(hidden_channels, num_classes))
 
         self.model = torch.nn.Sequential(*layers)
-
-    # TODO split into modules with coherent API
-    def set_mask_update(self, zeta=0.3):
-        for layer in self.model:
-            if not isinstance(layer, MaskedLayer):
-                continue
-
-            weight = layer.layer.weight.data
-            mask = layer.mask.data
-
-            flat_weight = weight.view(-1)
-            flat_mask = mask.view(-1)
-
-            active_weights = flat_weight[flat_mask.bool()]
-            k = int(zeta * active_weights.numel())
-            if k == 0: continue
-
-            threshold = active_weights.abs().topk(k, largest=False).values.max()
-            prune_mask = (flat_weight.abs() <= threshold) & (flat_mask == 1)
-            flat_mask[prune_mask] = 0
-
-            inactive_indices = (flat_mask == 0).nonzero(as_tuple=True)[0]
-            if len(inactive_indices) > 0:
-                grow_indices = inactive_indices[torch.randperm(len(inactive_indices))[:k]]
-                flat_mask[grow_indices] = 1
-
-            # calculate the norm of the active weights
-            norm_active_weights = active_weights.norm() if active_weights.numel() > 0 else 1.0
-
-            # reinitialize the active weights with random values drawn from a Gaussian distribution
-            # and scaled by the norm of the active weights
-            torch.nn.init.normal_(flat_weight[flat_mask.bool()], std=norm_active_weights / active_weights.numel() ** 0.5)
-
-            # update the mask data
-            layer.mask.data = flat_mask.view_as(layer.mask)
 
     def forward(self, x):
         return self.model(x)
