@@ -1,11 +1,28 @@
 from torch.utils.data import DataLoader
 from itertools import cycle
 from typing import List
-import torchvision
+import secrets
 import torch
 import numpy
-from network import SparseANN, SparseCNN
-import mask_mutation as mask
+
+import dataset
+import mask.network
+import mask.warmup
+import mask.regrowth
+import mask.pruning
+
+def update_mask(model: torch.nn.Module, warmup_strategy: mask.warmup.Warmup, prunning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth) -> torch.nn.Module:
+    model = warmup_strategy.apply(model)
+
+    for layer in model.model:
+        if not isinstance(layer, mask.network.MaskedLayer):
+            continue
+
+        pruned_count, pruned_layer = prunning_strategy.apply(layer)
+        regrowth_strategy.apply(pruned_count, pruned_layer)
+        # not assigning back should be safe as we deal with references
+
+    return model
 
 def evaluate(model: torch.nn.Module, testloader: DataLoader, device: torch.device) -> float:
     model.eval()
@@ -31,7 +48,7 @@ def soft_top_k(candidates: List, select: int = 1, decay_rate: float = 1.5) -> Li
     return [candidates[i] for i in selected_indices]  # return selected candidates
 
 def train_sgd_batch(model: torch.nn.Module, train_loader: DataLoader, test_loader: DataLoader,
-                    warmup_strategy: mask.Warmup = mask.NullWarmup(), pruning_strategy: mask.Pruning = mask.NullPruning(), regrowth_strategy: mask.Regrowth = mask.NullRegrowth(),
+                    warmup_strategy: mask.warmup.Warmup = mask.warmup.NullWarmup(), pruning_strategy: mask.pruning.Pruning = mask.pruning.NullPruning(), regrowth_strategy: mask.regrowth.Regrowth = mask.regrowth.NullRegrowth(),
                     device: torch.device = "cuda", epochs: int = 128, learning_rate: float = 0.01, minibatch_budget: int = 256):
 
     model.train()
@@ -44,12 +61,12 @@ def train_sgd_batch(model: torch.nn.Module, train_loader: DataLoader, test_loade
     for epoch in range(epochs):
         model.train()
 
-        model = mask.update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
+        model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
 
         # TODO for debugging mask update rules
-        # for name, param in model.named_parameters():
-        #     if name == 'model.9.mask':
-        #         print(name, param)
+        for name, param in model.named_parameters():
+            if name == 'model.9.mask':
+                print(name, param)
 
         total_loss = 0
 
@@ -75,7 +92,7 @@ def train_sgd_batch(model: torch.nn.Module, train_loader: DataLoader, test_loade
     return model
 
 def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoader,
-                   warmup_strategy: mask.Warmup = mask.NullWarmup(), pruning_strategy: mask.Pruning = mask.NullPruning(), regrowth_strategy: mask.Regrowth = mask.NullRegrowth(),
+                   warmup_strategy: mask.warmup.Warmup = mask.warmup.NullWarmup(), pruning_strategy: mask.pruning.Pruning = mask.pruning.NullPruning(), regrowth_strategy: mask.regrowth.Regrowth = mask.regrowth.NullRegrowth(),
                    device: torch.device = "cuda", generations: int = 128, offspring: int = 10, learning_rate: float = 0.01, minibatch_budget: int = 256):
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -91,7 +108,7 @@ def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoa
             child = model_factory().to(device)
             child.load_state_dict(best_model.state_dict())
 
-            child = mask.update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
+            child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
             child.train()
 
             child.index = idx + 1
@@ -126,40 +143,24 @@ def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoa
 
     return best_model
 
-def load_cifar10(train_batch: int = 32, test_batch: int = 512) -> (DataLoader, DataLoader):
-    transform = torchvision.transforms.Compose([
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        torchvision.transforms.Lambda(lambda x: torch.flatten(x))  # TODO comment it out if you use SparseCNN
-    ])
-
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-
-    train_loader = DataLoader(trainset, batch_size=train_batch, shuffle=True, num_workers=2, pin_memory=True)
-    test_loader = DataLoader(testset, batch_size=test_batch, shuffle=False, num_workers=2, pin_memory=True)
-
-    return train_loader, test_loader
-
 if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    seed = torch.rand(1).item()
-    sparsity = 0.995
+    seed = secrets.randbits(32)
+    sparsity = 0.5
     epochs = 50000
     offspring = 10
 
     torch.manual_seed(seed)
-    train_loader, test_loader = load_cifar10(train_batch=32, test_batch=512)
 
-    warmup_strategy = mask.NullWarmup() #mask.GradientWarmup(dataset=train_loader, minibatch_budget=64) # warmup will be used for eg gradient regrowth
-    pruning_strategy = mask.MagnitudePruning(pruned_fraction=0.3)
-    regrowth_strategy = mask.UniformRegrowth()
+    # model_factory = lambda: mask.network.SparseCNN(in_channels=3, num_classes=10, num_blocks=5, hidden_channels=128, sparsity=sparsity)
+    model_factory = lambda: mask.network.SparseANN(3*32*32, 32, 3, sparsity=sparsity, layernorm=True)
 
+    train_loader, test_loader = dataset.load_cifar10(train_batch=32, test_batch=512, flatten=True) # set to False for SparseCNN
 
-
-    # model_factory = lambda: SparseCNN(in_channels=3, num_classes=10, num_blocks=5, hidden_channels=128, sparsity=sparsity)
-    model_factory = lambda: SparseANN(3*32*32, 500, 3, sparsity=sparsity, layernorm=True)
+    warmup_strategy = mask.warmup.GradientWarmup(dataset=train_loader, minibatch_budget=64) #mask.warmup.NullWarmup() #mask.warmup.GradientWarmup(dataset=train_loader, minibatch_budget=64) # warmup will be used for eg gradient regrowth
+    pruning_strategy = mask.pruning.RSensitivityPruning(pruned_fraction=0.3) # mask.pruning.MagnitudePruning(pruned_fraction=0.3)
+    regrowth_strategy = mask.regrowth.GradientRegrowth()
 
     train_sgd_batch(model_factory(), train_loader, test_loader, warmup_strategy=warmup_strategy, pruning_strategy=pruning_strategy, regrowth_strategy=regrowth_strategy, device=device, epochs=epochs)
     # train_ea_batch(model_factory, train_loader, test_loader, warmup_strategy=warmup_strategy, pruning_strategy=pruning_strategy, regrowth_strategy=regrowth_strategy, device=device, generations=epochs, offspring=offspring)

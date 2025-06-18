@@ -1,5 +1,15 @@
 import torch
 
+class MaskedWeight(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, weight, mask):
+        return weight * mask
+
+    @staticmethod
+    def backward(ctx, gradient):
+        return gradient, None
+
 class MaskedLayer(torch.nn.Module):
     def __init__(self, layer: torch.nn.Module, sparsity: float = 0.8):
         super().__init__()
@@ -13,7 +23,7 @@ class MaskedLayer(torch.nn.Module):
         self.mask = torch.nn.Parameter(mask, requires_grad=False)
 
     def forward(self, x):
-        masked_weight = self.layer.weight * self.mask
+        masked_weight = MaskedWeight.apply(self.layer.weight, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
         if isinstance(self.layer, torch.nn.Linear): # there are much better ways to do this but it works for now
             return torch.nn.functional.linear(x, masked_weight, self.layer.bias)
         elif isinstance(self.layer, torch.nn.Conv2d):
