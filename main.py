@@ -1,3 +1,5 @@
+import json
+
 from torch.utils.data import DataLoader
 from itertools import cycle
 from typing import List
@@ -5,11 +7,15 @@ import secrets
 import torch
 import numpy
 
-import dataset
 import mask.network
 import mask.warmup
 import mask.regrowth
 import mask.pruning
+
+import argparse
+import settings
+import utilities
+import sys
 
 def update_mask(model: torch.nn.Module, warmup_strategy: mask.warmup.Warmup, prunning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
@@ -47,10 +53,10 @@ def soft_top_k(candidates: List, select: int = 1, decay_rate: float = 1.5) -> Li
 
     return [candidates[i] for i in selected_indices]  # return selected candidates
 
-def train_sgd_batch(model: torch.nn.Module, train_loader: DataLoader, test_loader: DataLoader,
+def train_sgd_batch(model_factory: torch.nn.Module, train_loader: DataLoader, test_loader: DataLoader,
                     warmup_strategy: mask.warmup.Warmup = mask.warmup.NullWarmup(), pruning_strategy: mask.pruning.Pruning = mask.pruning.NullPruning(), regrowth_strategy: mask.regrowth.Regrowth = mask.regrowth.NullRegrowth(),
                     device: torch.device = "cuda", epochs: int = 128, learning_rate: float = 0.01, minibatch_budget: int = 256):
-
+    model = model_factory()
     model.train()
     model.to(device)
 
@@ -63,10 +69,10 @@ def train_sgd_batch(model: torch.nn.Module, train_loader: DataLoader, test_loade
 
         model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
 
-        # TODO for debugging mask update rules
-        for name, param in model.named_parameters():
-            if name == 'model.9.mask':
-                print(name, param)
+        # # TODO for debugging mask update rules
+        # for name, param in model.named_parameters():
+        #     if name == 'model.9.mask':
+        #         print(name, param)
 
         total_loss = 0
 
@@ -87,7 +93,7 @@ def train_sgd_batch(model: torch.nn.Module, train_loader: DataLoader, test_loade
         total_loss /= minibatch_budget
         acc = evaluate(model, test_loader, device)
 
-        print(f" ::: [Epoch {epoch+1:03d}] ::: batches: {total_batches:06d}, loss: {total_loss:7.4f}, test acc: {acc:.2f}%")
+        settings.logger.log({"epoch": epoch, "batches": total_batches, "loss": total_loss, "test_acc": acc})
 
     return model
 
@@ -130,7 +136,7 @@ def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoa
             child.fitness /= minibatch_budget
             children.append(child)
 
-            print(f" --- Gen {gen:01d} | child {child.index:02d} | loss: {child.fitness:7.4f}")
+            # print(f" --- Gen {gen:01d} | child {child.index:02d} | loss: {child.fitness:7.4f}")
         total_batches += minibatch_budget
 
         # sort based on fitness
@@ -139,28 +145,40 @@ def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoa
         best_model = soft_top_k(children, select=1, decay_rate=1.75)[0]
         test_acc = evaluate(best_model, test_loader, device)
 
-        print(f" ::: [Gen {gen:03d}] ::: parent | batches: {total_batches:06d}, survivor: {best_model.index:02d}, loss: {best_model.fitness:7.4f}, test acc: {test_acc:.2f}%")
+        settings.logger.log({"epoch": gen, "batches": total_batches, "survivor": best_model.index, "loss": best_model.fitness, "test_acc": test_acc})
 
     return best_model
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    seed = secrets.randbits(32)
-    sparsity = 0.5
-    epochs = 50000
-    offspring = 10
+    parser.add_argument('--configuration', default=None, type=json.loads, help="experiment configuration to run")
+    parser.add_argument('--seed', default=secrets.randbits(32), type=int, help='training seed (for reproducibility)')
 
-    torch.manual_seed(seed)
+    # parse args
+    args = parser.parse_args()
 
-    # model_factory = lambda: mask.network.SparseCNN(in_channels=3, num_classes=10, num_blocks=5, hidden_channels=128, sparsity=sparsity)
-    model_factory = lambda: mask.network.SparseANN(3*32*32, 32, 3, sparsity=sparsity, layernorm=True)
+    # seed rngs
+    rng = numpy.random.default_rng(seed=args.seed)
+    numpy.random.seed(rng.integers(0, 2 ** 32 - 1))
+    torch.manual_seed(rng.integers(0, 2 ** 32 - 1))
 
-    train_loader, test_loader = dataset.load_cifar10(train_batch=32, test_batch=512, flatten=True) # set to False for SparseCNN
+    # if no pipeline is passed through command line, scan stdin
+    if args.configuration is None:
+        configuration = ""
+        for line in sys.stdin:
+            configuration += line
+        args.configuration = json.loads(configuration)
 
-    warmup_strategy = mask.warmup.GradientWarmup(dataset=train_loader, minibatch_budget=64) #mask.warmup.NullWarmup() #mask.warmup.GradientWarmup(dataset=train_loader, minibatch_budget=64) # warmup will be used for eg gradient regrowth
-    pruning_strategy = mask.pruning.RSensitivityPruning(pruned_fraction=0.3) # mask.pruning.MagnitudePruning(pruned_fraction=0.3)
-    regrowth_strategy = mask.regrowth.GradientRegrowth()
+    # spawn global settings object
+    settings = settings.Settings(args.configuration)
 
-    train_sgd_batch(model_factory(), train_loader, test_loader, warmup_strategy=warmup_strategy, pruning_strategy=pruning_strategy, regrowth_strategy=regrowth_strategy, device=device, epochs=epochs)
-    # train_ea_batch(model_factory, train_loader, test_loader, warmup_strategy=warmup_strategy, pruning_strategy=pruning_strategy, regrowth_strategy=regrowth_strategy, device=device, generations=epochs, offspring=offspring)
+    # instantiate referenced objects
+    train_loader, test_loader = utilities.resolve_class(settings.dataset["type"])(**settings.dataset["kwargs"]).load()
+    model_factory = lambda: utilities.resolve_class(settings.model["type"])(**settings.model["kwargs"])
+    warmup = utilities.resolve_class(settings.warmup["type"])(dataset=train_loader, **settings.warmup["kwargs"])
+    pruning = utilities.resolve_class(settings.pruning["type"])(**settings.pruning["kwargs"])
+    regrowth = utilities.resolve_class(settings.regrowth["type"])(**settings.regrowth["kwargs"])
+
+    # instantiate experiment handle and call it
+    mode = globals()[settings.mode["type"]](model_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, **settings.mode["kwargs"])

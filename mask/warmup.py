@@ -11,6 +11,9 @@ class Warmup(ABC):
 
 class NullWarmup(Warmup):
 
+    def __init__(self, **_ignored):
+        pass
+
     def apply(self, model: torch.nn.Module) -> torch.nn.Module:
         return model
 

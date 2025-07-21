@@ -1,0 +1,9 @@
+{
+  "log": "./data/experiment_a.log",
+  "model": {"type": "mask.network.SparseANN", "kwargs": {"in_features": 3072, "hidden_dim": 128, "num_hidden_layers": 3, "sparsity": 0.975, "act": "tanh", "layernorm": true}},
+  "dataset": {"type": "dataset.cifar10.CIFAR10", "kwargs": {"train_batch": 32, "test_batch": 512, "flatten": true}},
+  "warmup": {"type": "mask.warmup.GradientWarmup", "kwargs": {"minibatch_budget": 64}},
+  "pruning": {"type": "mask.pruning.RSensitivityPruning", "kwargs": {"pruned_fraction": 0.3}},
+  "regrowth": {"type": "mask.regrowth.GradientRegrowth", "kwargs": {}},
+  "mode": {"type": "train_sgd_batch", "kwargs": {"device": "cuda", "epochs": 1000}}
+}
