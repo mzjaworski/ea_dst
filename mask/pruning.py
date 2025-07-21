@@ -39,7 +39,7 @@ class MagnitudePruning(Pruning):
             return 0, layer
 
         # sort descending by magnitude
-        magnitudes, order = torch.sort(flat_weight[active_neurons].abs(), descending=True)
+        magnitudes, order = torch.sort(flat_weight[active_neurons].abs(), descending=False)
         sorted_idx = active_neurons[order]
 
         # soft-top-k selection on sorted magnitudes
@@ -124,7 +124,7 @@ class RSensitivityPruning(Pruning):
         sensitivity = abs_weight / (abs_grad + 1e-8)
 
         # sort by sensitivity ascending (lowest sensitivity first)
-        sorted_sensitivity, order = torch.sort(sensitivity) # TODO VERIFY THIS PART
+        sorted_sensitivity, order = torch.sort(sensitivity, descending=False) # TODO VERIFY THIS PART
         sorted_indices = active_indices[order]
 
         # apply soft_top_k selection mask

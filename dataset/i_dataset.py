@@ -4,5 +4,5 @@ import torch
 class IDataset(ABC):
 
     @abstractmethod
-    def load(self, stack_level: int = 2) -> (torch.utils.data.DataLoader, torch.utils.data.DataLoader):
+    def load(self) -> (torch.utils.data.DataLoader, torch.utils.data.DataLoader):
         pass
