@@ -44,7 +44,7 @@ class UniformRegrowth(Regrowth):
 
 class GradientRegrowth(Regrowth):
 
-    def __init__(self, decay_rate: float = 1.5):
+    def __init__(self, decay_rate: float):
         self.decay_rate = decay_rate
 
     def apply(self, pruned_count: int, layer: mask.network.MaskedLayer) -> mask.network.MaskedLayer:

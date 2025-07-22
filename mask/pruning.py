@@ -18,7 +18,7 @@ class NullPruning(Pruning):
 
 class MagnitudePruning(Pruning):
 
-    def __init__(self, pruned_fraction: float = 0.1, decay_rate: float = 1.5):
+    def __init__(self, pruned_fraction: float, decay_rate: float):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
             raise ValueError("pruned_fraction must be in [0.0, 1.0]")
 
@@ -38,12 +38,19 @@ class MagnitudePruning(Pruning):
         if total_active == 0:
             return 0, layer
 
-        # sort descending by magnitude
-        magnitudes, order = torch.sort(flat_weight[active_neurons].abs(), descending=False)
-        sorted_idx = active_neurons[order]
+        pruned_count = int(self.pruned_fraction * total_active)
+        mags = flat_weight[active_neurons].abs()
 
         # soft-top-k selection on sorted magnitudes
-        sel_mask = mask.utilities.soft_top_k(magnitudes, select=int(self.pruned_fraction * total_active), decay_rate=self.decay_rate)
+        if self.decay_rate is not None:
+            magnitudes, order = torch.sort(mags, descending=False)
+            sorted_idx = active_neurons[order]
+            sel_mask = mask.utilities.soft_top_k(magnitudes, select=pruned_count, decay_rate=self.decay_rate)
+        else:
+            _, smallest_idxs = torch.topk(mags, k=pruned_count, largest=False)
+            sel_mask = torch.zeros_like(mags, dtype=torch.bool)
+            sel_mask[smallest_idxs] = True
+            sorted_idx = active_neurons
 
         # map mask back to absolute indices
         to_prune = sorted_idx[sel_mask]
@@ -56,7 +63,7 @@ class MagnitudePruning(Pruning):
 
 class UniformPruning(Pruning):
 
-    def __init__(self, pruned_fraction: float = 0.1):
+    def __init__(self, pruned_fraction: float):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
             raise ValueError("pruned_fraction must be in [0.0, 1.0]")
 
@@ -92,7 +99,7 @@ class UniformPruning(Pruning):
 
 class RSensitivityPruning(Pruning):
 
-    def __init__(self, pruned_fraction: float = 0.1, decay_rate: float = 1.5):
+    def __init__(self, pruned_fraction: float, decay_rate: float):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
             raise ValueError("pruned_fraction must be in [0.0, 1.0]")
 
@@ -123,12 +130,17 @@ class RSensitivityPruning(Pruning):
         abs_grad = flat_grad[active_indices].abs()
         sensitivity = abs_weight / (abs_grad + 1e-8)
 
-        # sort by sensitivity ascending (lowest sensitivity first)
-        sorted_sensitivity, order = torch.sort(sensitivity, descending=False) # TODO VERIFY THIS PART
-        sorted_indices = active_indices[order]
+        pruned_count = int(self.pruned_fraction * total_active)
 
         # apply soft_top_k selection mask
-        sel_mask = mask.utilities.soft_top_k(sorted_sensitivity, select=int(self.pruned_fraction * total_active), decay_rate=self.decay_rate)
+        if self.decay_rate is not None:
+            sorted_sensitivity, order = torch.sort(sensitivity, descending=False)  # TODO VERIFY THIS PART
+            sorted_indices = active_indices[order]
+            sel_mask = mask.utilities.soft_top_k(sorted_sensitivity, select=pruned_count, decay_rate=self.decay_rate)
+        else:
+            _, smallest_idxs = torch.topk(sensitivity, k=pruned_count, largest=False)  # TODO VERIFY THIS PART
+            sel_mask = torch.zeros_like(sensitivity, dtype=torch.bool)
+            sel_mask[smallest_idxs] = True
 
         # map mask back to indices to prune
         prune_indices = sorted_indices[sel_mask]

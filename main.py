@@ -43,7 +43,7 @@ def evaluate(model: torch.nn.Module, testloader: DataLoader, device: torch.devic
             total += targets.size(0)
     return 100 * correct / total
 
-def soft_top_k(candidates: List, select: int = 1, decay_rate: float = 1.5) -> List:
+def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     num_candidates = len(candidates)
     candidate_indices = numpy.arange(num_candidates)
 
@@ -54,8 +54,8 @@ def soft_top_k(candidates: List, select: int = 1, decay_rate: float = 1.5) -> Li
     return [candidates[i] for i in selected_indices]  # return selected candidates
 
 def train_sgd_batch(model_factory: torch.nn.Module, train_loader: DataLoader, test_loader: DataLoader,
-                    warmup_strategy: mask.warmup.Warmup = mask.warmup.NullWarmup(), pruning_strategy: mask.pruning.Pruning = mask.pruning.NullPruning(), regrowth_strategy: mask.regrowth.Regrowth = mask.regrowth.NullRegrowth(),
-                    device: torch.device = "cuda", epochs: int = 128, learning_rate: float = 0.01, minibatch_budget: int = 256):
+                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth,
+                    device: torch.device, epochs: int, learning_rate: float, minibatch_budget: int):
     model = model_factory()
     model.train()
     model.to(device)
@@ -98,8 +98,8 @@ def train_sgd_batch(model_factory: torch.nn.Module, train_loader: DataLoader, te
     return model
 
 def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoader,
-                   warmup_strategy: mask.warmup.Warmup = mask.warmup.NullWarmup(), pruning_strategy: mask.pruning.Pruning = mask.pruning.NullPruning(), regrowth_strategy: mask.regrowth.Regrowth = mask.regrowth.NullRegrowth(),
-                   device: torch.device = "cuda", generations: int = 128, offspring: int = 10, learning_rate: float = 0.01, minibatch_budget: int = 256):
+                   warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth,
+                   device: torch.device, generations: int, offspring: int, learning_rate: float, minibatch_budget: int):
     criterion = torch.nn.CrossEntropyLoss()
 
     best_model = model_factory().to(device)

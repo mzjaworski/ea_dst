@@ -11,7 +11,7 @@ class MaskedWeight(torch.autograd.Function):
         return gradient, None
 
 class MaskedLayer(torch.nn.Module):
-    def __init__(self, layer: torch.nn.Module, sparsity: float = 0.8):
+    def __init__(self, layer: torch.nn.Module, sparsity: float):
         super().__init__()
         assert isinstance(layer, (torch.nn.Linear, torch.nn.Conv2d)), "MaskedLayer supports Linear or Conv2d only"
         self.layer = layer
@@ -31,7 +31,7 @@ class MaskedLayer(torch.nn.Module):
         raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
 class SparseANN(torch.nn.Module):
-    def __init__(self, in_features: int = 784, hidden_dim: int = 250, num_hidden_layers: int = 3, sparsity: float = 0.8, act: str = "tanh", layernorm: bool = True):
+    def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, sparsity: float, act: str, layernorm: bool):
         super().__init__()
 
         act_f = torch.nn.Tanh if act == "tanh" else torch.nn.ReLU
@@ -59,7 +59,7 @@ class SparseANN(torch.nn.Module):
         return self.model(x)
 
 class SparseCNN(torch.nn.Module):
-    def __init__(self, in_channels: int = 3, num_classes: int = 10, num_blocks: int = 5, hidden_channels: int = 128, sparsity: float = 0.8, act: str = "relu", layernorm: bool = True):
+    def __init__(self, in_channels: int, num_classes: int, num_blocks: int, hidden_channels: int, sparsity: float, act: str, layernorm: bool):
         super().__init__()
 
         act_fn = torch.nn.ReLU if act == "relu" else torch.nn.Tanh
