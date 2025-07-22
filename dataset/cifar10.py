@@ -1,3 +1,4 @@
+from typing import Tuple
 import dataset.i_dataset
 import torch.utils.data
 import torchvision
@@ -5,17 +6,18 @@ import torch
 
 class CIFAR10(dataset.i_dataset.IDataset):
 
-    def __init__(self, train_batch: int = 32, test_batch: int = 512, flatten: bool = True):
+    def __init__(self, train_batch: int, test_batch: int, resize: Tuple[float, float], flatten: bool):
         self.train_batch = train_batch
         self.test_batch = test_batch
+        self.resize = resize
         self.flatten = flatten
 
     def load(self) -> (torch.utils.data.DataLoader, torch.utils.data.DataLoader):
         transform = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(self.resize),
             torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-            torchvision.transforms.Lambda(lambda x: torch.flatten(x)) if self.flatten else torchvision.transforms.Lambda(
-                lambda x: x)  # needed for CNNs
+            torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),
+            torchvision.transforms.Lambda(lambda x: torch.flatten(x)) if self.flatten else torchvision.transforms.Lambda(lambda x: x)  # needed for CNNs
         ])
 
         trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)

@@ -31,7 +31,7 @@ class MaskedLayer(torch.nn.Module):
         raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
 class SparseANN(torch.nn.Module):
-    def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, sparsity: float, act: str, layernorm: bool):
+    def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
         super().__init__()
 
         act_f = torch.nn.Tanh if act == "tanh" else torch.nn.ReLU

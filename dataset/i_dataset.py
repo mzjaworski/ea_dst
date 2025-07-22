@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import torch.utils.data
 import torch
 
 class IDataset(ABC):
