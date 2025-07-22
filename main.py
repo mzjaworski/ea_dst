@@ -53,16 +53,16 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
 
     return [candidates[i] for i in selected_indices]  # return selected candidates
 
-def train_sgd_batch(model_factory: torch.nn.Module, train_loader: DataLoader, test_loader: DataLoader,
+def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                     warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth,
-                    device: torch.device, epochs: int, learning_rate: float, minibatch_budget: int):
+                    device: torch.device, epochs: int, minibatch_budget: int):
     model = model_factory()
+    optimizer = optimizer_factory(model)
+    criterion = criterion_factory()
+    total_batches = 0
+
     model.train()
     model.to(device)
-
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.0)
-    criterion = torch.nn.CrossEntropyLoss()
-    total_batches = 0
 
     for epoch in range(epochs):
         model.train()
@@ -97,15 +97,16 @@ def train_sgd_batch(model_factory: torch.nn.Module, train_loader: DataLoader, te
 
     return model
 
-def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoader,
+def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth,
-                   device: torch.device, generations: int, offspring: int, learning_rate: float, minibatch_budget: int):
-    criterion = torch.nn.CrossEntropyLoss()
+                   device: torch.device, generations: int, offspring: int, decay_rate: float, minibatch_budget: int):
 
     best_model = model_factory().to(device)
-    best_model.fitness = float("inf")
+    criterion = criterion_factory()
 
+    best_model.fitness = float("inf")
     total_batches = 0
+
     for gen in range(1, generations + 1):
         best_model.index = 0
 
@@ -120,7 +121,7 @@ def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoa
             child.index = idx + 1
             child.fitness = 0.0
 
-            optimizer = torch.optim.SGD(child.parameters(), lr=learning_rate, momentum=0.0)
+            optimizer = optimizer_factory(child)
             for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
                 if batch_index >= minibatch_budget:
                     break
@@ -136,16 +137,16 @@ def train_ea_batch(model_factory, train_loader: DataLoader, test_loader: DataLoa
             child.fitness /= minibatch_budget
             children.append(child)
 
-            # print(f" --- Gen {gen:01d} | child {child.index:02d} | loss: {child.fitness:7.4f}")
+            # settings.logger.log({"epoch": gen, "child": child.index, "loss": child.fitness})
         total_batches += minibatch_budget
 
         # sort based on fitness
         children.sort(key=lambda c: c.fitness)
 
-        best_model = soft_top_k(children, select=1, decay_rate=1.75)[0]
+        best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
         test_acc = evaluate(best_model, test_loader, device)
 
-        settings.logger.log({"epoch": gen, "batches": total_batches, "survivor": best_model.index, "loss": best_model.fitness, "test_acc": test_acc})
+        settings.logger.log({"epoch": gen, "child": "survivor", "batches": total_batches, "index": best_model.index, "loss": best_model.fitness, "test_acc": test_acc})
 
     return best_model
 
@@ -175,10 +176,14 @@ if __name__ == "__main__":
 
     # instantiate referenced objects
     train_loader, test_loader = utilities.resolve_class(settings.dataset["type"])(**settings.dataset["kwargs"]).load()
+
     model_factory = lambda: utilities.resolve_class(settings.model["type"])(**settings.model["kwargs"])
+    optimizer_factory = lambda x: utilities.resolve_class(settings.optimizer["type"])(x.parameters(), **settings.optimizer["kwargs"])
+    criterion_factory = lambda: utilities.resolve_class(settings.criterion["type"])(**settings.criterion["kwargs"])
+
     warmup = utilities.resolve_class(settings.warmup["type"])(dataset=train_loader, **settings.warmup["kwargs"])
     pruning = utilities.resolve_class(settings.pruning["type"])(**settings.pruning["kwargs"])
     regrowth = utilities.resolve_class(settings.regrowth["type"])(**settings.regrowth["kwargs"])
 
     # instantiate experiment handle and call it
-    mode = globals()[settings.mode["type"]](model_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, **settings.mode["kwargs"])
+    mode = globals()[settings.mode["type"]](model_factory, optimizer_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, **settings.mode["kwargs"])

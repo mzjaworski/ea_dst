@@ -20,6 +20,8 @@ class Settings(metaclass=SingletonMeta):
         # store current experiment settings
         self.dataset = configuration["dataset"]
         self.model = configuration["model"]
+        self.optimizer = configuration["optimizer"]
+        self.criterion = configuration["criterion"]
         self.warmup = configuration["warmup"]
         self.pruning = configuration["pruning"]
         self.regrowth = configuration["regrowth"]
