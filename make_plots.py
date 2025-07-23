@@ -61,8 +61,10 @@ def get_files(filepaths: List[str]) -> List[str]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='make_plots', description='script used to automate making plots')
 
+    parser.add_argument('--title', default=None, type=str, help="optional plot title")
     parser.add_argument('--groups', default='{"DST": [], "EA": []}', type=json.loads, help="groups of log files to use for plotting")
     parser.add_argument('--needles', default='["loss"]', type=json.loads, help="fields to extract from logs")
+    parser.add_argument('--save_to', default=None, type=str, help="optional place to save current plot")
 
     # parse args
     args = parser.parse_args()
@@ -81,7 +83,10 @@ if __name__ == "__main__":
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
 
-    plt.title(f"{xlabel} - {ylabel}")
+    if args.title is None:
+        args.title = f"{xlabel} - {ylabel}"
+
+    plt.title(args.title)
 
     for group_name, group_files in args.groups.items():
 
@@ -104,4 +109,8 @@ if __name__ == "__main__":
     plt.legend()
     plt.tight_layout()
 
-    plt.show()
+    if args.save_to is not None:
+        plt.savefig(args.save_to)
+        plt.close()
+    else:
+        plt.show()
