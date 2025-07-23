@@ -23,6 +23,9 @@ def extract_needles_as_float(filepath: str, needle: str) -> List[float]:
 def average_extracted_needles(filepaths: List[str], needle: str) -> List[float]:
     all_matches = [extract_needles_as_float(path, needle) for path in filepaths]
 
+    if not len(all_matches):
+        raise RuntimeError(f"couldn't match any '{needle}' in the specified directories {filepaths}")
+
     # identify file with max elements
     maximum_length = max(len(matches) for matches in all_matches)
     longest_list = next(matches for matches in all_matches if len(matches) == maximum_length)
@@ -37,22 +40,6 @@ def average_extracted_needles(filepaths: List[str], needle: str) -> List[float]:
     # now average per index
     return [sum(matches[i] for matches in all_matches) / len(all_matches) for i in range(maximum_length)]
 
-def plot_two_groups(losses_a, losses_b, label_a="Group A", label_b="Group B", xlabel="Epoch", ylabel="Loss", title="Average Loss Comparison"):
-    min_len = min(len(losses_a), len(losses_b))
-    losses_a = losses_a[:min_len]
-    losses_b = losses_b[:min_len]
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(losses_a, label=label_a, linewidth=2)
-    plt.plot(losses_b, label=label_b, linewidth=2)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
 def get_files(filepaths: List[str]) -> List[str]:
     files = []
 
@@ -66,6 +53,8 @@ def get_files(filepaths: List[str]) -> List[str]:
                 for file in dir_files:
                     full_path = os.path.join(root, file)
                     files.append(full_path)
+        else:
+            raise RuntimeError(f"{abs_path} is neither a valid file or an existing directory")
 
     return files
 

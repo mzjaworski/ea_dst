@@ -10,7 +10,6 @@ class FileLogger(logger.i_logger.ILogger):
         self.logger = logging.getLogger(logger_name)
         self.logger.propagate = False
         self.logger.handlers.clear()
-        self.stack_level = 2 # capture callers scope
 
         # create dir if absent
         directory = os.path.dirname(filename)
@@ -22,8 +21,5 @@ class FileLogger(logger.i_logger.ILogger):
         self.logger.addHandler(self._file_handler)
         self.logger.setLevel(self.get_level())
 
-    def set_stack_level(self, stack_level: int = 2):
-        self.stack_level = stack_level
-
     def log(self, data: dict) -> None:
-        self.logger.info(self.format_message(data), stacklevel=self.stack_level)
+        self.logger.info(self.format_message(data))

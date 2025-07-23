@@ -10,7 +10,6 @@ class StdoutLogger(logger.i_logger.ILogger):
         self.logger.propagate = False
         self.logger.handlers.clear()
         self._stream = sys.stdout
-        self.stack_level = 2 # capture callers scope
 
         handler = logging.StreamHandler(self._stream)
         handler.setFormatter(self.get_formatter())
@@ -18,8 +17,5 @@ class StdoutLogger(logger.i_logger.ILogger):
         self.logger.addHandler(handler)
         self.logger.setLevel(self.get_level())
 
-    def set_stack_level(self, stack_level: int = 2):
-        self.stack_level = stack_level
-
     def log(self, data: dict) -> None:
-        self.logger.info(self.format_message(data), stacklevel=self.stack_level)
+        self.logger.info(self.format_message(data))

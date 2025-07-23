@@ -24,9 +24,5 @@ class ILogger(ABC):
         return logging.Formatter(cls.DEFAULT_FMT, datefmt=cls.DEFAULT_DATEFMT)
 
     @abstractmethod
-    def set_stack_level(self, stack_level: int = 2):
-        pass
-
-    @abstractmethod
     def log(self, data: dict) -> None:
         pass
