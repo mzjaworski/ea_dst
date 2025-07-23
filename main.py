@@ -135,7 +135,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
                 child.fitness += loss.item()
 
             child.fitness /= minibatch_budget
-            children.append(child.to("cpu"))
+            children.append(child)
 
             # settings.logger.log({"epoch": gen, "child": child.index, "loss": child.fitness})
         total_batches += minibatch_budget
@@ -143,7 +143,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
         # sort based on fitness
         children.sort(key=lambda c: c.fitness)
 
-        best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0].to(device)
+        best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
         test_acc = evaluate(best_model, test_loader, device)
 
         settings.logger.log({"epoch": gen, "child": "survivor", "batches": total_batches, "index": best_model.index, "loss": best_model.fitness, "test_acc": test_acc})
