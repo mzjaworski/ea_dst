@@ -1,1 +1,1 @@
-pip install argparse torch torchvision
+pip install argparse torch torchvision matplotlib
