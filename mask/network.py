@@ -14,13 +14,28 @@ class MaskedLayer(torch.nn.Module):
     def __init__(self, layer: torch.nn.Module, sparsity: float):
         super().__init__()
         assert isinstance(layer, (torch.nn.Linear, torch.nn.Conv2d)), "MaskedLayer supports Linear or Conv2d only"
+        assert 0.0 <= sparsity < 1.0, "sparsity must be in [0, 1.0)"
+
         self.layer = layer
+        self.sparsity = sparsity
 
         # Create mask with given sparsity
         mask = torch.zeros_like(layer.weight)
         k = int((1 - sparsity) * mask.numel())
         mask.view(-1)[torch.randperm(mask.numel())[:k]] = 1
         self.mask = torch.nn.Parameter(mask, requires_grad=False)
+
+    def expected_sparsity(self) -> float:
+        return self.sparsity
+
+    def realized_sparsity(self) -> float:
+        return 1.0 - self.mask.sum().item() / self.mask.numel()
+
+    def active_weights(self) -> int:
+        return int(self.mask.sum().item())
+
+    def total_weights(self) -> int:
+        return self.mask.numel()
 
     def forward(self, x):
         masked_weight = MaskedWeight.apply(self.layer.weight, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
@@ -55,6 +70,20 @@ class SparseANN(torch.nn.Module):
 
         self.model = torch.nn.Sequential(*layers)
 
+    def expected_sparsity(self) -> float:
+        data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def realized_sparsity(self) -> float:
+        data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def active_weights(self) -> int:
+        return sum([layer.active_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+
+    def total_weights(self) -> int:
+        return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+
     def forward(self, x):
         return self.model(x)
 
@@ -88,6 +117,20 @@ class SparseCNN(torch.nn.Module):
         layers.append(torch.nn.Linear(hidden_channels, num_classes))
 
         self.model = torch.nn.Sequential(*layers)
+
+    def expected_sparsity(self) -> float:
+        data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def realized_sparsity(self) -> float:
+        data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def active_weights(self) -> int:
+        return sum([layer.active_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+
+    def total_weights(self) -> int:
+        return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
 
     def forward(self, x):
         return self.model(x)

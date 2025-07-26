@@ -97,9 +97,24 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
             total_batches += 1
 
         total_loss /= minibatch_budget
-        acc = evaluate(model, test_loader, device)
 
-        settings.logger.log({"epoch": epoch, "batches": total_batches, "loss": total_loss, "test_acc": acc})
+        # log stats
+        acc = evaluate(model, test_loader, device)
+        expected_sparsity = model.expected_sparsity()
+        realized_sparsity = model.realized_sparsity()
+        active_weights = model.active_weights()
+        total_weights = model.total_weights()
+
+        settings.logger.log({
+            "epoch": epoch,
+            "batches": total_batches,
+            "loss": total_loss,
+            "test_acc": acc,
+            "expected_sparsity": expected_sparsity,
+            "realized_sparsity": realized_sparsity,
+            "active_weights": active_weights,
+            "total_weights": total_weights
+        })
 
     return model
 
@@ -141,18 +156,33 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
                 child.fitness += loss.item()
 
             child.fitness /= minibatch_budget
+            total_batches += minibatch_budget
             children.append(child)
-
-            # settings.logger.log({"epoch": gen, "child": child.index, "loss": child.fitness})
-        total_batches += minibatch_budget
 
         # sort based on fitness
         children.sort(key=lambda c: c.fitness)
 
+        # pick winner
         best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
-        test_acc = evaluate(best_model, test_loader, device)
 
-        settings.logger.log({"epoch": gen, "child": "survivor", "batches": total_batches, "index": best_model.index, "loss": best_model.fitness, "test_acc": test_acc})
+        # log stats
+        test_acc = evaluate(best_model, test_loader, device)
+        expected_sparsity = best_model.expected_sparsity()
+        realized_sparsity = best_model.realized_sparsity()
+        active_weights = best_model.active_weights()
+        total_weights = best_model.total_weights()
+
+        settings.logger.log({
+            "epoch": gen,
+            "batches": total_batches,
+            "survivor": best_model.index,
+            "loss": best_model.fitness,
+            "test_acc": test_acc,
+            "expected_sparsity": expected_sparsity,
+            "realized_sparsity": realized_sparsity,
+            "active_weights": active_weights,
+            "total_weights": total_weights
+        })
 
     return best_model
 
