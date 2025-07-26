@@ -70,7 +70,7 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
     model.train()
     model.to(device)
 
-    for epoch in range(epochs):
+    for epoch in range(1, epochs + 1):
         model.train()
 
         model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
