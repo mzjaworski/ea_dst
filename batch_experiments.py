@@ -1,8 +1,40 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import argparse
 import json
 import sys
+from typing import List
+import settings
+import re
+import copy
+import os
+import time
+import subprocess
+
+class GlobalStorage(metaclass=settings.SingletonMeta): # not a good design choice but it will do
+    def __init__(self):
+        thread_id = None
+
+thread_local = threading.local()
+thread_id_lock = threading.Lock()
+
+def replace_all(haystack: str, needle: str, replacement: str) -> str:
+    return re.sub(needle, replacement, haystack)
+
+def thread_id():
+    if not hasattr(thread_local, 'thread_id'):
+        with thread_id_lock:
+            thread_local.thread_id = next(GlobalStorage().thread_id)
+    return thread_local.thread_id
+
+def run_experiment(command: str, devices: List[str], needle: str) -> None:
+    id = thread_id()
+
+    try:
+        command = replace_all(command, needle, devices[id])
+        subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+    except Exception as e:
+        print(f"command: {command}\n failed with error: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
@@ -23,7 +55,30 @@ if __name__ == "__main__":
             configuration += line
         args.configuration = json.loads(configuration)
 
-    # get number of runs
+    # generate file ids and names
+    file_ids = [i for i in range(args.runs)]
+    file_names = [f"{i}.json" for i in file_ids]
 
-    # replace
-    print(args.configuration)
+    # assemble object generating per thread ids
+    GlobalStorage().thread_id = iter(range(len(args.devices)))
+
+    # generate log locations
+    commands = []
+    for run_index in range(args.runs):
+        command = copy.deepcopy(args.configuration)
+        directory, filename = os.path.split(command['log'])
+        command['log'] = os.path.join(directory, replace_all(filename, args.log_needle, file_names[run_index])) # a bit excessive
+        command = f"echo '{json.dumps(command)}' | python ./main.py" # not platform-agnostic
+        commands.append(command)
+
+    # run commands in thread pool
+    with ThreadPoolExecutor(max_workers=len(args.devices)) as executor:
+        futures = []
+
+        for command in commands:
+            futures.append(executor.submit(run_experiment, command, args.devices, args.device_needle))
+
+        for future in as_completed(futures):
+            error = future.result()
+
+    print("done")
