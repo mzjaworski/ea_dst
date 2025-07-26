@@ -32,6 +32,7 @@ def run_experiment(command: str, devices: List[str], needle: str) -> None:
 
     try:
         command = replace_all(command, needle, devices[id])
+        print(f"running: {command}")
         subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
     except Exception as e:
         print(f"command: {command}\n failed with error: {e}")
