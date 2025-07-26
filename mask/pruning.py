@@ -42,15 +42,9 @@ class MagnitudePruning(Pruning):
         mags = flat_weight[active_neurons].abs()
 
         # soft-top-k selection on sorted magnitudes
-        if self.decay_rate is not None:
-            magnitudes, order = torch.sort(mags, descending=False)
-            sorted_idx = active_neurons[order]
-            sel_mask = mask.utilities.soft_top_k(magnitudes, select=pruned_count, decay_rate=self.decay_rate)
-        else:
-            _, smallest_idxs = torch.topk(mags, k=pruned_count, largest=False)
-            sel_mask = torch.zeros_like(mags, dtype=torch.bool)
-            sel_mask[smallest_idxs] = True
-            sorted_idx = active_neurons
+        magnitudes, order = torch.sort(mags, descending=False)
+        sorted_idx = active_neurons[order]
+        sel_mask = mask.utilities.soft_top_k(magnitudes, select=pruned_count, decay_rate=self.decay_rate)
 
         # map mask back to absolute indices
         to_prune = sorted_idx[sel_mask]
@@ -133,14 +127,9 @@ class RSensitivityPruning(Pruning):
         pruned_count = int(self.pruned_fraction * total_active)
 
         # apply soft_top_k selection mask
-        if self.decay_rate is not None:
-            sorted_sensitivity, order = torch.sort(sensitivity, descending=False)  # TODO VERIFY THIS PART
-            sorted_indices = active_indices[order]
-            sel_mask = mask.utilities.soft_top_k(sorted_sensitivity, select=pruned_count, decay_rate=self.decay_rate)
-        else:
-            _, smallest_idxs = torch.topk(sensitivity, k=pruned_count, largest=False)  # TODO VERIFY THIS PART
-            sel_mask = torch.zeros_like(sensitivity, dtype=torch.bool)
-            sel_mask[smallest_idxs] = True
+        sorted_sensitivity, order = torch.sort(sensitivity, descending=True)
+        sorted_indices = active_indices[order]
+        sel_mask = mask.utilities.soft_top_k(sorted_sensitivity, select=pruned_count, decay_rate=self.decay_rate)
 
         # map mask back to indices to prune
         prune_indices = sorted_indices[sel_mask]

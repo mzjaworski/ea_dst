@@ -44,14 +44,20 @@ def evaluate(model: torch.nn.Module, testloader: DataLoader, device: torch.devic
     return 100 * correct / total
 
 def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
+
+    if decay_rate is None:
+        return candidates[:select]
+
     num_candidates = len(candidates)
     candidate_indices = numpy.arange(num_candidates)
 
-    selection_weights = numpy.exp(-decay_rate * candidate_indices)
-    selection_probabilities = selection_weights / selection_weights.sum()
-    selected_indices = numpy.random.choice(num_candidates, size=select, replace=False, p=selection_probabilities)
+    percentiles = candidate_indices / (num_candidates - 1) if num_candidates > 1 else numpy.zeros(1)
 
-    return [candidates[i] for i in selected_indices]  # return selected candidates
+    weights = numpy.exp(-decay_rate * percentiles)
+    probabilities = weights / weights.sum()
+    selected_indices = numpy.random.choice(num_candidates, size=select, replace=False, p=probabilities)
+
+    return [candidates[i] for i in selected_indices]
 
 def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                     warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth,

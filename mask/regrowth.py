@@ -76,12 +76,7 @@ class GradientRegrowth(Regrowth):
 
         # regrow these weights
         flat_mask[grow] = 1
-
-        flat_weight = weight.data.view(-1)
-        new_w = flat_weight[flat_mask.to(torch.bool)]
-        norm = new_w.norm() if new_w.numel() else 1.0
-        std = norm / (new_w.numel() ** 0.5) # TODO most likely I should set this to zero
-        torch.nn.init.normal_(flat_weight[grow], std=std)
-
+        weight.data.view(-1)[grow] = 0.0
         layer.mask.data = flat_mask.view_as(original_mask)
+
         return layer
