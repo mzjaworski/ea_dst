@@ -66,7 +66,7 @@ class SparseANN(torch.nn.Module):
             layers.append(act_f())
 
         # output layer
-        layers.append(torch.nn.Linear(hidden_dim, 10))
+        layers.append(torch.nn.Linear(hidden_dim, num_classes))
 
         self.model = torch.nn.Sequential(*layers)
 
