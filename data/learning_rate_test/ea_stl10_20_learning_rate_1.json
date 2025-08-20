@@ -1,0 +1,11 @@
+{
+  "log": "./data/logs/stl10/ea/pop/20/learning_rate/1/LOG_IDENTIFIER",
+  "model": {"type": "mask.network.SparseANN", "kwargs": {"in_features": 12288, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 10, "sparsity": 0.995, "act": "tanh", "layernorm": true}},
+  "dataset": {"type": "dataset.stl10.STL10", "kwargs": {"train_batch": 32, "test_batch": 512, "resize": [64, 64], "flatten": true, "preload": true, "device": "DEVICE_LOCATION"}},
+  "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.002, "momentum": 0.0}},
+  "criterion": {"type": "torch.nn.CrossEntropyLoss", "kwargs": {}},
+  "warmup": {"type": "mask.warmup.NullWarmup", "kwargs": {}},
+  "pruning": {"type": "mask.pruning.MagnitudePruning", "kwargs": {"pruned_fraction": 0.3, "decay_rate": null}},
+  "regrowth": {"type": "mask.regrowth.UniformRegrowth", "kwargs": {}},
+  "mode": {"type": "train_ea_batch", "kwargs": {"device": "DEVICE_LOCATION", "generations": 300, "offspring": 20, "decay_rate": 15.75049050490505, "minibatch_budget": 256}}
+}
