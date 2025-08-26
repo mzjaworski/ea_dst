@@ -4,6 +4,7 @@ import torch
 
 import mask.utilities
 import mask.network
+import mask.decay
 
 class Pruning(ABC):
 
@@ -11,10 +12,17 @@ class Pruning(ABC):
     def apply(self, layer: mask.network.MaskedLayer) -> Tuple[int, mask.network.MaskedLayer]: # (pruned_count, pruned_layer)
         pass
 
+    @abstractmethod
+    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+        pass
+
 class NullPruning(Pruning):
 
     def apply(self, layer: mask.network.MaskedLayer) -> Tuple[int, mask.network.MaskedLayer]:
         return 0, layer
+
+    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+        return 0.0
 
 class MagnitudePruning(Pruning):
 
@@ -55,6 +63,10 @@ class MagnitudePruning(Pruning):
 
         return num_pruned, layer
 
+    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+        self.pruned_fraction = strategy.decay(self.pruned_fraction)
+        return self.pruned_fraction
+
 class UniformPruning(Pruning):
 
     def __init__(self, pruned_fraction: float):
@@ -90,6 +102,10 @@ class UniformPruning(Pruning):
         layer.mask.data = flat_mask.view_as(original_mask)
 
         return num_to_prune, layer
+
+    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+        self.pruned_fraction = strategy.decay(self.pruned_fraction)
+        return self.pruned_fraction
 
 class RSensitivityPruning(Pruning):
 
@@ -140,3 +156,7 @@ class RSensitivityPruning(Pruning):
             layer.mask.data = flat_mask.view_as(original_mask)
 
         return num_pruned, layer
+
+    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+        self.pruned_fraction = strategy.decay(self.pruned_fraction)
+        return self.pruned_fraction

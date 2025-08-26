@@ -11,6 +11,7 @@ import mask.network
 import mask.warmup
 import mask.regrowth
 import mask.pruning
+import mask.decay
 
 import argparse
 import settings
@@ -60,7 +61,7 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     return [candidates[i] for i in selected_indices]
 
 def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
-                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth,
+                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
                     device: torch.device, epochs: int, minibatch_budget: int):
     model = model_factory()
     optimizer = optimizer_factory(model)
@@ -71,8 +72,9 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
     model.to(device)
 
     for epoch in range(1, epochs + 1):
-        model.train()
+        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy)
 
+        model.train()
         model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
 
         # # TODO for debugging mask update rules
@@ -110,6 +112,7 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
             "batches": total_batches,
             "loss": total_loss,
             "test_acc": acc,
+            "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
             "realized_sparsity": realized_sparsity,
             "active_weights": active_weights,
@@ -119,7 +122,7 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
     return model
 
 def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
-                   warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth,
+                   warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
                    device: torch.device, generations: int, offspring: int, decay_rate: float, minibatch_budget: int):
 
     best_model = model_factory().to(device)
@@ -129,14 +132,16 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
     total_batches = 0
 
     for gen in range(1, generations + 1):
+        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy)
         best_model.index = 0
 
         children = []
-        for idx in range(offspring):
+        for idx in range(offspring + 1):
             child = model_factory().to(device)
             child.load_state_dict(best_model.state_dict())
 
-            child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
+            if idx:
+                child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
             child.train()
 
             child.index = idx + 1
@@ -178,6 +183,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
             "survivor": best_model.index,
             "loss": best_model.fitness,
             "test_acc": test_acc,
+            "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
             "realized_sparsity": realized_sparsity,
             "active_weights": active_weights,
@@ -220,6 +226,7 @@ if __name__ == "__main__":
     warmup = utilities.resolve_class(settings.warmup["type"])(dataset=train_loader, **settings.warmup["kwargs"])
     pruning = utilities.resolve_class(settings.pruning["type"])(**settings.pruning["kwargs"])
     regrowth = utilities.resolve_class(settings.regrowth["type"])(**settings.regrowth["kwargs"])
+    decay = utilities.resolve_class(settings.decay["type"])(**settings.decay["kwargs"])
 
     # instantiate experiment handle and call it
-    mode = globals()[settings.mode["type"]](model_factory, optimizer_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, **settings.mode["kwargs"])
+    mode = globals()[settings.mode["type"]](model_factory, optimizer_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, decay_strategy=decay, **settings.mode["kwargs"])

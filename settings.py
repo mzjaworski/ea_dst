@@ -25,6 +25,7 @@ class Settings(metaclass=SingletonMeta):
         self.warmup = configuration["warmup"]
         self.pruning = configuration["pruning"]
         self.regrowth = configuration["regrowth"]
+        self.decay = configuration["decay"]
         self.mode = configuration["mode"]
 
         self._logger = None

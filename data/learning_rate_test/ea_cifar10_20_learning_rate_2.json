@@ -7,5 +7,6 @@
   "warmup": {"type": "mask.warmup.NullWarmup", "kwargs": {}},
   "pruning": {"type": "mask.pruning.MagnitudePruning", "kwargs": {"pruned_fraction": 0.3, "decay_rate": null}},
   "regrowth": {"type": "mask.regrowth.UniformRegrowth", "kwargs": {}},
+  "decay": {"type": "mask.decay.NullDecay", "kwargs": {}},
   "mode": {"type": "train_ea_batch", "kwargs": {"device": "DEVICE_LOCATION", "generations": 300, "offspring": 20, "decay_rate": 15.75049050490505, "minibatch_budget": 256}}
 }
