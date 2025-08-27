@@ -20,25 +20,48 @@ def extract_needles(filepath: str, needle: str) -> List[str]:
 def extract_needles_as_float(filepath: str, needle: str) -> List[float]:
     return [float(entry) for entry in extract_needles(filepath, needle)]
 
-def average_extracted_needles(filepaths: List[str], needle: str) -> List[float]:
-    all_matches = [extract_needles_as_float(path, needle) for path in filepaths]
-
-    if not len(all_matches):
-        raise RuntimeError(f"couldn't match any '{needle}' in the specified directories {filepaths}")
-
+def average_extracted_needles(matches: List[List[float]]) -> List[float]:
     # identify file with max elements
-    maximum_length = max(len(matches) for matches in all_matches)
-    longest_list = next(matches for matches in all_matches if len(matches) == maximum_length)
+    maximum_length = max(len(matches) for matches in matches)
+    longest_list = next(matches for matches in matches if len(matches) == maximum_length)
 
     # pad using its values shorter lists
-    for i in range(len(all_matches)):
-        current = all_matches[i]
+    for i in range(len(matches)):
+        current = matches[i]
         if len(current) < maximum_length:
             padding = longest_list[len(current):]
-            all_matches[i] = current + padding
+            matches[i] = current + padding
 
     # now average per index
-    return [sum(matches[i] for matches in all_matches) / len(all_matches) for i in range(maximum_length)]
+    return [sum(matches[i] for matches in matches) / len(matches) for i in range(maximum_length)]
+
+def bernoulli_extracted_needles_sma(matches: List[List[float]], class_value: float = 1.0, window_size: int = 17) -> List[float]:
+
+    # identify file with max elements
+    maximum_length = max(len(m) for m in matches)
+    longest_list = next(m for m in matches if len(m) == maximum_length)
+
+    # pad shorter lists using values from the longest list
+    padded_matches = []
+    for m in matches:
+        if len(m) < maximum_length:
+            m = m + longest_list[len(m):]
+        padded_matches.append(m)
+
+    # compute Bernoulli probabilities per index
+    probabilities = []
+    for i in range(maximum_length):
+        count_class = sum(1 for m in padded_matches if m[i] == class_value)
+        probabilities.append(count_class / len(padded_matches))
+
+    # apply simple moving average (last `window_size` entries)
+    smoothed = []
+    for i in range(maximum_length):
+        start = max(0, i - window_size + 1)
+        window = probabilities[start:i+1]
+        smoothed.append(sum(window) / len(window))
+
+    return smoothed
 
 def get_files(filepaths: List[str]) -> List[str]:
     files = []
@@ -98,7 +121,15 @@ if __name__ == "__main__":
         data = []
 
         for needle in args.needles:
-            data.append(average_extracted_needles(group_files, needle))
+            matches = [extract_needles_as_float(path, needle) for path in group_files]
+
+            if not len(matches):
+                raise RuntimeError(f"couldn't match any '{needle}' in the specified directories {group_files}")
+
+            if needle == "survivor":
+                data.append(bernoulli_extracted_needles_sma(matches))
+            else:
+                data.append(average_extracted_needles(matches))
 
         if len(data) == 1:
             data.append(list(range(len(data[0]))))

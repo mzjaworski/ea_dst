@@ -72,7 +72,7 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
     model.to(device)
 
     for epoch in range(1, epochs + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy)
+        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
 
         model.train()
         model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
@@ -127,12 +127,14 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
 
     best_model = model_factory().to(device)
     criterion = criterion_factory()
+    best_model.index = 1
 
     best_model.fitness = float("inf")
     total_batches = 0
+    last_chosen = 0
 
     for gen in range(1, generations + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy)
+        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(1.0 if best_model.index == 1 else 0.0))
         best_model.index = 0
 
         children = []
