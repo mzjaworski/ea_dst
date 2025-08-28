@@ -6,7 +6,7 @@ import re
 import os
 
 def extract_needles(filepath: str, needle: str) -> List[str]:
-    search_pattern = re.compile(rf'\[{re.escape(needle)}::([0-9.]+)\]')
+    search_pattern = re.compile(rf'\[{re.escape(needle)}::([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\]')
     matches = []
 
     with open(filepath, 'r') as file:
@@ -126,7 +126,7 @@ if __name__ == "__main__":
             if not len(matches):
                 raise RuntimeError(f"couldn't match any '{needle}' in the specified directories {group_files}")
 
-            if needle == "survivor":
+            if needle in ["survivor", "indicator"]:
                 data.append(bernoulli_extracted_needles_sma(matches))
             else:
                 data.append(average_extracted_needles(matches))

@@ -131,10 +131,10 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
 
     best_model.fitness = float("inf")
     total_batches = 0
-    last_chosen = 0
+    indicator = 1.0
 
     for gen in range(1, generations + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(1.0 if best_model.index == 1 else 0.0))
+        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
         best_model.index = 0
 
         children = []
@@ -171,6 +171,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
 
         # pick winner
         best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
+        indicator = 1.0 if best_model.index == 1 else 0.0
 
         # log stats
         test_acc = evaluate(best_model, test_loader, device)
@@ -183,6 +184,87 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
             "epoch": gen,
             "batches": total_batches,
             "survivor": best_model.index,
+            "indicator": indicator,
+            "loss": best_model.fitness,
+            "test_acc": test_acc,
+            "pruned_fraction": pruned_fraction,
+            "expected_sparsity": expected_sparsity,
+            "realized_sparsity": realized_sparsity,
+            "active_weights": active_weights,
+            "total_weights": total_weights
+        })
+
+    return best_model
+
+def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
+                      warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
+                      device: torch.device, generations: int, offspring: int, decay_rate: float, minibatch_budget: int):
+
+    best_model = model_factory().to(device)
+    criterion = criterion_factory()
+    best_model.index = 1
+
+    best_model.fitness = float("inf")
+    total_batches = 0
+    indicator = 1.0
+
+    for gen in range(1, generations):
+        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
+        best_model.index = 0
+
+        children = []
+        for idx in range(offspring + 1):
+            child = model_factory().to(device)
+            child.load_state_dict(best_model.state_dict())
+
+            child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
+            child.train()
+
+            child.index = idx + 1
+            child.fitness = 0.0
+
+            optimizer = optimizer_factory(child)
+            for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
+                if batch_index >= minibatch_budget:
+                    break
+
+                inputs, targets = inputs.to(device), targets.to(device)
+                outputs = child(inputs)
+                loss = criterion(outputs, targets)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                child.fitness += loss.item()
+
+            child.fitness /= minibatch_budget
+            total_batches += minibatch_budget
+            children.append(child)
+
+        # sort based on fitness
+        children.sort(key=lambda c: c.fitness)
+
+        # pick winner
+        selected_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
+
+        # update indicator
+        did_not_improve = True if best_model.fitness <= selected_model.fitness else False
+        indicator = 1.0 if did_not_improve else 0.0
+
+        # store winner
+        best_model = selected_model
+
+        # log stats
+        test_acc = evaluate(best_model, test_loader, device)
+        expected_sparsity = best_model.expected_sparsity()
+        realized_sparsity = best_model.realized_sparsity()
+        active_weights = best_model.active_weights()
+        total_weights = best_model.total_weights()
+
+        settings.logger.log({
+            "epoch": gen,
+            "batches": total_batches,
+            "survivor": best_model.index,
+            "indicator": indicator,
             "loss": best_model.fitness,
             "test_acc": test_acc,
             "pruned_fraction": pruned_fraction,
