@@ -28,8 +28,8 @@ def thread_id():
     return thread_local.thread_id
 
 def run_experiment(command: str, devices: List[str], needle: str) -> None:
-    id = thread_id()
-
+    id = thread_id() % len(devices)
+    
     try:
         command = replace_all(command, needle, devices[id])
         print(f"running: {command}")
@@ -45,35 +45,45 @@ if __name__ == "__main__":
     parser.add_argument('--device_needle', default="DEVICE_LOCATION", type=str, help='string that will be replaced with passed device')
     parser.add_argument('--log_needle', default="LOG_IDENTIFIER", type=str, help='string that will be replaced with run ID')
     parser.add_argument('--runs', default=5, type=int, help='number of parallel experiments to run')
+    parser.add_argument('--workers', default=5 * 6, type=int, help='number of parallel workers')
 
     # parse args
     args = parser.parse_args()
 
     # if no pipeline is passed through command line, scan stdin
     if args.configuration is None:
-        configuration = ""
+        configuration = []
         for line in sys.stdin:
-            configuration += line
-        args.configuration = json.loads(configuration)
+            configuration.append(line.strip())
+        args.configuration = configuration
+
+    if not isinstance(args.configuration, list):
+        raise RuntimeError("configuration type should be list!")
+
+    # load specified files
+    for file_index in range(len(args.configuration)):
+        with open(args.configuration[file_index], "r") as file:
+            args.configuration[file_index] = json.load(file)
 
     # generate file ids and names
     file_ids = [i for i in range(args.runs)]
     file_names = [f"{i}.log" for i in file_ids]
 
     # assemble object generating per thread ids
-    GlobalStorage().thread_id = iter(range(len(args.devices)))
+    GlobalStorage().thread_id = iter(range(args.workers))
 
     # generate log locations
     commands = []
-    for run_index in range(args.runs):
-        command = copy.deepcopy(args.configuration)
-        directory, filename = os.path.split(command['log'])
-        command['log'] = os.path.join(directory, replace_all(filename, args.log_needle, file_names[run_index])) # a bit excessive
-        command = f"echo '{json.dumps(command)}' | python ./main.py" # not platform-agnostic
-        commands.append(command)
+    for configuration in args.configuration:
+        for run_index in range(args.runs):
+            command = copy.deepcopy(configuration)
+            directory, filename = os.path.split(command['log'])
+            command['log'] = os.path.join(directory, replace_all(filename, args.log_needle, file_names[run_index])) # a bit excessive
+            command = f"echo '{json.dumps(command)}' | python ./main.py" # not platform-agnostic
+            commands.append(command)
 
     # run commands in thread pool
-    with ThreadPoolExecutor(max_workers=len(args.devices)) as executor:
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = []
 
         for command in commands:
