@@ -1,4 +1,5 @@
 import torch
+import mask.utilities
 
 class MaskedWeight(torch.autograd.Function):
 
@@ -67,6 +68,52 @@ class SparseANN(torch.nn.Module):
 
         # output layer
         layers.append(torch.nn.Linear(hidden_dim, num_classes))
+
+        self.model = torch.nn.Sequential(*layers)
+
+    def expected_sparsity(self) -> float:
+        data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def realized_sparsity(self) -> float:
+        data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def active_weights(self) -> int:
+        return sum([layer.active_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+
+    def total_weights(self) -> int:
+        return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+
+    def forward(self, x):
+        return self.model(x)
+
+class DenseANNFromSparseANN(torch.nn.Module):
+    def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
+        super().__init__()
+
+        network_depth = 3
+        weight_target = SparseANN(in_features=in_features, hidden_dim=hidden_dim, num_hidden_layers=num_hidden_layers, num_classes=num_classes, sparsity=sparsity, act=act, layernorm=layernorm).active_weights()
+        neuron_count = mask.utilities.estimate_neuron_count(features=in_features, classes=num_classes, network_depth=network_depth, parameter_target=weight_target)
+
+        act_f = torch.nn.Tanh if act == "tanh" else torch.nn.ReLU
+        norm = torch.nn.LayerNorm if layernorm else torch.nn.Identity
+
+        layers = []
+
+        # input layer
+        layers.append(MaskedLayer(torch.nn.Linear(in_features, neuron_count, bias=False), 0.0))
+        layers.append(norm(neuron_count))
+        layers.append(act_f())
+
+        # hidden layers
+        for _ in range(network_depth - 2):
+            layers.append(MaskedLayer(torch.nn.Linear(neuron_count, neuron_count, bias=False), 0.0))
+            layers.append(norm(neuron_count))
+            layers.append(act_f())
+
+        # output layer
+        layers.append(torch.nn.Linear(neuron_count, num_classes))
 
         self.model = torch.nn.Sequential(*layers)
 

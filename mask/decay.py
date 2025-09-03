@@ -36,7 +36,6 @@ class LinearDecay(DecayStrategy):
 class ExponentialDecay(DecayStrategy):
 
     def __init__(self, factor: float):
-        assert 0.0 <= factor <= 1.0, "factor must be in [0, 1]"
         self.factor = factor
 
     def update(self, value: float) -> Self:
@@ -65,13 +64,17 @@ class BetaDecayStrategy(DecayStrategy):
         self.failure_count += 1.0 - value
         return self
 
+    def decay_target(self, strategy: DecayStrategy = NullDecay()) -> float:
+        self.target = strategy.decay(self.target)
+        return self.target
+
     def decay(self, value: float) -> float:
         total = self.success_count + self.failure_count
         p_hat = (self.success_count / total) if total > 0 else 0.5
         factor = (self.target / (p_hat + 1e-8)) ** self.gamma
         adjusted = value * factor
 
-        print(total,p_hat, factor, adjusted)
+        print(self.target, p_hat, factor, adjusted)
 
         if adjusted < self.low:
             adjusted = self.low

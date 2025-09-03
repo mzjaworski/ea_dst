@@ -3,7 +3,7 @@
   "model": {"type": "mask.network.SparseANN", "kwargs": {"in_features": 3072, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 10, "sparsity": 0.9975, "act": "tanh", "layernorm": true}},
   "dataset": {"type": "dataset.cifar10.CIFAR10", "kwargs": {"train_batch": 32, "test_batch": 512, "resize": [32, 32], "flatten": true, "preload": true, "device": "DEVICE_LOCATION"}},
   "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.01, "momentum": 0.0}},
-  "criterion": {"type": "torch.nn.CrossEntropyLoss", "kwargs": {}},
+  "criterion": {"type": "torch.nn.CrossEntropyLoss", "kwargs": {"reduction": "none"}},
   "warmup": {"type": "mask.warmup.NullWarmup", "kwargs": {}},
   "pruning": {"type": "mask.pruning.MagnitudePruning", "kwargs": {"pruned_fraction": 0.3, "decay_rate": null}},
   "regrowth": {"type": "mask.regrowth.UniformRegrowth", "kwargs": {}},
