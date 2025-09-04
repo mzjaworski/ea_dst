@@ -18,8 +18,6 @@ import settings
 import utilities
 import sys
 
-from scipy.stats import kurtosis, skew
-
 def update_mask(model: torch.nn.Module, warmup_strategy: mask.warmup.Warmup, prunning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
 
@@ -73,8 +71,6 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
     model.train()
     model.to(device)
 
-
-
     for epoch in range(1, epochs + 1):
         pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
 
@@ -87,9 +83,6 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
         #         print(name, param)
 
         total_mean = 0
-        total_variance = 0
-        total_skew = 0
-        total_kurtosis = 0
 
         for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
             if batch_index >= minibatch_budget:
@@ -101,9 +94,6 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
 
             with torch.no_grad():
                 total_mean += loss.mean().item()
-                total_variance += loss.var().item()
-                total_skew += skew(loss.cpu())
-                total_kurtosis += kurtosis(loss.cpu(), fisher=False)
                 total_batches += 1
 
             optimizer.zero_grad()
@@ -112,9 +102,6 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
             optimizer.step()
 
         total_mean /= minibatch_budget
-        total_variance /= minibatch_budget
-        total_skew /= minibatch_budget
-        total_kurtosis /= minibatch_budget
 
         # log stats
         acc = evaluate(model, test_loader, device)
@@ -127,9 +114,6 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
             "epoch": epoch,
             "batches": total_batches,
             "mean_loss": total_mean,
-            "variance_loss": total_variance,
-            "skewness_loss": total_skew,
-            "kurtosis_loss": total_kurtosis,
             "test_acc": acc,
             "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
@@ -148,7 +132,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
     criterion = criterion_factory()
     best_model.index = 1
 
-    best_model.fitness = float("inf")
+    best_model.mean_loss = float("inf")
     total_batches = 0
     indicator = 1.0
 
@@ -166,9 +150,6 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
 
             child.index = idx + 1
             child.mean_loss = 0.0
-            child.variance_loss = 0.0
-            child.skewness_loss = 0.0
-            child.kurtosis_loss = 0.0
 
             optimizer = optimizer_factory(child)
             for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
@@ -181,9 +162,6 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
 
                 with torch.no_grad():
                     child.mean_loss += loss.mean().item()
-                    child.variance_loss += loss.var().item()
-                    child.skewness_loss += skew(loss.cpu())
-                    child.kurtosis_loss += kurtosis(loss.cpu(), fisher=False)
                     total_batches += 1
 
                 optimizer.zero_grad()
@@ -192,10 +170,6 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
                 optimizer.step()
 
             child.mean_loss /= minibatch_budget
-            child.variance_loss /= minibatch_budget
-            child.skewness_loss /= minibatch_budget
-            child.kurtosis_loss /= minibatch_budget
-
             total_batches += minibatch_budget
             children.append(child)
 
@@ -219,9 +193,6 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
             "survivor": best_model.index,
             "indicator": indicator,
             "mean_loss": best_model.mean_loss,
-            "variance_loss": best_model.variance_loss,
-            "skewness_loss": best_model.skewness_loss,
-            "kurtosis_loss": best_model.kurtosis_loss,
             "test_acc": test_acc,
             "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
@@ -240,7 +211,7 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
     criterion = criterion_factory()
     best_model.index = 1
 
-    best_model.fitness = float("inf")
+    best_model.mean_loss = float("inf")
     total_batches = 0
     indicator = 1.0
 
@@ -249,19 +220,15 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
         best_model.index = 0
 
         children = []
-        for idx in range(offspring + 1):
+        for idx in range(offspring):
             child = model_factory().to(device)
             child.load_state_dict(best_model.state_dict())
 
-            if idx:
-                child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
+            child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
             child.train()
 
             child.index = idx + 1
             child.mean_loss = 0.0
-            child.variance_loss = 0.0
-            child.skewness_loss = 0.0
-            child.kurtosis_loss = 0.0
 
             optimizer = optimizer_factory(child)
             for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
@@ -274,9 +241,6 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
 
                 with torch.no_grad():
                     child.mean_loss += loss.mean().item()
-                    child.variance_loss += loss.var().item()
-                    child.skewness_loss += skew(loss.cpu())
-                    child.kurtosis_loss += kurtosis(loss.cpu(), fisher=False)
                     total_batches += 1
 
                 optimizer.zero_grad()
@@ -285,10 +249,6 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
                 optimizer.step()
 
             child.mean_loss /= minibatch_budget
-            child.variance_loss /= minibatch_budget
-            child.skewness_loss /= minibatch_budget
-            child.kurtosis_loss /= minibatch_budget
-
             total_batches += minibatch_budget
             children.append(child)
 
@@ -296,8 +256,14 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
         children.sort(key=lambda c: c.mean_loss)
 
         # pick winner
-        best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
-        indicator = 1.0 if best_model.index == 1 else 0.0
+        selected_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
+
+        # update indicator
+        did_not_improve = True if best_model.mean_loss <= selected_model.mean_loss else False
+        indicator = 1.0 if did_not_improve else 0.0
+
+        # store winner
+        best_model = selected_model
 
         # log stats
         test_acc = evaluate(best_model, test_loader, device)
@@ -312,9 +278,6 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
             "survivor": best_model.index,
             "indicator": indicator,
             "mean_loss": best_model.mean_loss,
-            "variance_loss": best_model.variance_loss,
-            "skewness_loss": best_model.skewness_loss,
-            "kurtosis_loss": best_model.kurtosis_loss,
             "test_acc": test_acc,
             "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
