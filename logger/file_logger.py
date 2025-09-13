@@ -14,7 +14,7 @@ class FileLogger(logger.i_logger.ILogger):
         # create dir if absent
         directory = os.path.dirname(filename)
         if not os.path.exists(directory):
-            os.makedirs(directory)
+            os.makedirs(directory, exist_ok=True) # can fail when running multiple experiments
 
         self._file_handler = logging.FileHandler(filename)
         self._file_handler.setFormatter(self.get_formatter())

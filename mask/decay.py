@@ -46,16 +46,19 @@ class ExponentialDecay(DecayStrategy):
 
 class BetaDecayStrategy(DecayStrategy):
 
-    def __init__(self, target: float, decay_range: Sequence[float], memory_decay: float = 0.95, gamma: float = 0.5):
+    def __init__(self, target: float, decay_range: Sequence[float], memory_decay: float = 0.95, gamma: float = 0.5, init: float | None = None):
         self.low, self.high = sorted(decay_range)
         self.target = float(target)
         self.memory_decay = float(memory_decay)
         self.gamma = float(gamma)
 
+        if init is None:
+            init = target
+
         # initialize based on implied target
         memory = 1.0 / (1.0 - memory_decay)
-        self.success_count = target * memory
-        self.failure_count = (1 - target) * memory
+        self.success_count = init * memory
+        self.failure_count = (1.0 - init) * memory
 
     def update(self, value: float) -> Self:
         self.success_count *= self.memory_decay

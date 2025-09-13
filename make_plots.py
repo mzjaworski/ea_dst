@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
-from typing import List
+from typing import List, Tuple
+import scipy.stats
 import argparse
+import numpy
 import json
 import re
 import os
@@ -20,47 +22,46 @@ def extract_needles(filepath: str, needle: str) -> List[str]:
 def extract_needles_as_float(filepath: str, needle: str) -> List[float]:
     return [float(entry) for entry in extract_needles(filepath, needle)]
 
-def average_extracted_needles(matches: List[List[float]]) -> List[float]:
+def average_with_confidence(series_list: List[List[float]], confidence: float = 0.95) -> Tuple[List[float], List[float], List[float]]:
     # identify file with max elements
-    maximum_length = max(len(matches) for matches in matches)
-    longest_list = next(matches for matches in matches if len(matches) == maximum_length)
-
+    longest_length = max(len(s) for s in series_list)
+    longest_series = max(series_list, key=len)
+    
     # pad using its values shorter lists
-    for i in range(len(matches)):
-        current = matches[i]
-        if len(current) < maximum_length:
-            padding = longest_list[len(current):]
-            matches[i] = current + padding
+    padded_series = []
+    for s in series_list:
+        if len(s) < longest_length:
+            # pad with the values from the remainder of the longest series
+            extra_values = longest_series[len(s):]
+            padded_series.append(s + extra_values)
+        else:
+            padded_series.append(s)
 
-    # now average per index
-    return [sum(matches[i] for matches in matches) / len(matches) for i in range(maximum_length)]
+    # convert to numpy and average
+    data = numpy.array(padded_series, dtype=float)
+    mean_values = data.mean(axis=0)
 
-def bernoulli_extracted_needles_sma(matches: List[List[float]], class_value: float = 1.0, window_size: int = 17) -> List[float]:
+    # compute CI using students-t
+    n = data.shape[0]
+    alpha = 1.0 - confidence
+    t_crit = scipy.stats.t.ppf(1.0 - alpha / 2.0, df=n - 1)
+    standard_error = scipy.stats.sem(data, axis=0, nan_policy="omit")
+    margin = t_crit * standard_error
 
-    # identify file with max elements
-    maximum_length = max(len(m) for m in matches)
-    longest_list = next(m for m in matches if len(m) == maximum_length)
+    lower_bound = mean_values - margin
+    upper_bound = mean_values + margin
 
-    # pad shorter lists using values from the longest list
-    padded_matches = []
-    for m in matches:
-        if len(m) < maximum_length:
-            m = m + longest_list[len(m):]
-        padded_matches.append(m)
+    return mean_values.tolist(), lower_bound.tolist(), upper_bound.tolist()
 
-    # compute Bernoulli probabilities per index
-    probabilities = []
-    for i in range(maximum_length):
-        count_class = sum(1 for m in padded_matches if m[i] == class_value)
-        probabilities.append(count_class / len(padded_matches))
-
-    # apply simple moving average (last `window_size` entries)
+def simple_moving_average(values: List[float], window_size: int = 17) -> List[float]:
+    """
+    Apply simple moving average smoothing over a list of values.
+    """
     smoothed = []
-    for i in range(maximum_length):
+    for i in range(len(values)):
         start = max(0, i - window_size + 1)
-        window = probabilities[start:i+1]
+        window = values[start:i+1]
         smoothed.append(sum(window) / len(window))
-
     return smoothed
 
 def get_files(filepaths: List[str]) -> List[str]:
@@ -88,6 +89,7 @@ if __name__ == "__main__":
     parser.add_argument('--groups', default='{"DST": [], "EA": []}', type=json.loads, help="groups of log files to use for plotting")
     parser.add_argument('--needles', default='["loss"]', type=json.loads, help="fields to extract from logs")
     parser.add_argument('--save_to', default=None, type=str, help="optional place to save current plot")
+    parser.add_argument('--ci', default=True, type=bool, action=argparse.BooleanOptionalAction, help='plot ci or not')
 
     # parse args
     args = parser.parse_args()
@@ -118,23 +120,32 @@ if __name__ == "__main__":
 
         # in case user passed directories retrieve all files inside, otherwise noop
         group_files = get_files(group_files)
-        data = []
-
+        
+        means = []
+        lower_bounds = []
+        upper_bounds = []
+        
         for needle in args.needles:
             matches = [extract_needles_as_float(path, needle) for path in group_files]
-
+            
             if not len(matches):
                 raise RuntimeError(f"couldn't match any '{needle}' in the specified directories {group_files}")
-
-            if needle in ["survivor", "indicator"]:
-                data.append(bernoulli_extracted_needles_sma(matches))
-            else:
-                data.append(average_extracted_needles(matches))
-
-        if len(data) == 1:
-            data.append(list(range(len(data[0]))))
-
-        plt.plot(data[1], data[0], label=group_name, linewidth=2)
+            
+            mean, lower_bound, upper_bound = average_with_confidence(matches, confidence=0.95)
+            
+            means.append(mean)
+            lower_bounds.append(lower_bound)
+            upper_bounds.append(upper_bound)
+            
+        if len(means) == 1:
+            means.append(list(range(len(means[0]))))
+        
+        axis = plt.gca()
+        axis.plot(means[1], means[0], label=group_name, linewidth=2)
+        
+        if args.ci and len(lower_bounds) and len(upper_bounds):
+            axis.fill_between(means[1], lower_bounds[0], upper_bounds[0], color=axis.lines[-1].get_color(), alpha=0.35)
+        
 
     plt.grid(True)
     plt.legend()

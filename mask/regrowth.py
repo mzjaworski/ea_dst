@@ -41,7 +41,6 @@ class UniformRegrowth(Regrowth):
 
         return layer
 
-
 class GradientRegrowth(Regrowth):
 
     def __init__(self, decay_rate: float):
