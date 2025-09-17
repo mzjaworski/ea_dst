@@ -21,6 +21,7 @@ class Settings(metaclass=SingletonMeta):
         self.dataset = configuration["dataset"]
         self.model = configuration["model"]
         self.optimizer = configuration["optimizer"]
+        self.lr_decay = configuration["lr_decay"]
         self.criterion = configuration["criterion"]
         self.warmup = configuration["warmup"]
         self.pruning = configuration["pruning"]

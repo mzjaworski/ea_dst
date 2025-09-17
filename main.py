@@ -60,11 +60,12 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
 
     return [candidates[i] for i in selected_indices]
 
-def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
+def train_sgd_batch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                     warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
                     device: torch.device, epochs: int, minibatch_budget: int):
     model = model_factory()
     optimizer = optimizer_factory(model)
+    lr_decay = lr_decay_factory(optimizer)
     criterion = criterion_factory()
     total_batches = 0
 
@@ -82,7 +83,8 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
         #     if name == 'model.9.mask':
         #         print(name, param)
 
-        total_mean = 0
+        total_mean = 0.0
+        total_variance = 0.0
 
         for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
             if batch_index >= minibatch_budget:
@@ -94,6 +96,7 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
 
             with torch.no_grad():
                 total_mean += loss.mean().item()
+                total_variance += loss.var().item()
                 total_batches += 1
 
             optimizer.zero_grad()
@@ -102,6 +105,7 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
             optimizer.step()
 
         total_mean /= minibatch_budget
+        total_variance /= minibatch_budget
 
         # log stats
         acc = evaluate(model, test_loader, device)
@@ -110,10 +114,14 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
         active_weights = model.active_weights()
         total_weights = model.total_weights()
 
+        if lr_decay is not None:
+            lr_decay.step()
+
         settings.logger.log({
             "epoch": epoch,
             "batches": total_batches,
             "mean_loss": total_mean,
+            "variance_loss": total_variance,
             "test_acc": acc,
             "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
@@ -124,7 +132,7 @@ def train_sgd_batch(model_factory, optimizer_factory, criterion_factory, train_l
 
     return model
 
-def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
+def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
                    device: torch.device, generations: int, offspring: int, decay_rate: float, minibatch_budget: int):
 
@@ -150,6 +158,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
 
             child.index = idx + 1
             child.mean_loss = 0.0
+            child.variance_loss = 0.0
 
             optimizer = optimizer_factory(child)
             for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
@@ -162,6 +171,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
 
                 with torch.no_grad():
                     child.mean_loss += loss.mean().item()
+                    child.variance_loss += loss.var().item()
                     total_batches += 1
 
                 optimizer.zero_grad()
@@ -170,6 +180,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
                 optimizer.step()
 
             child.mean_loss /= minibatch_budget
+            child.variance_loss /= minibatch_budget
             total_batches += minibatch_budget
             children.append(child)
 
@@ -193,6 +204,9 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
             "survivor": best_model.index,
             "indicator": indicator,
             "mean_loss": best_model.mean_loss,
+            "variance_loss": best_model.variance_loss,
+            "p_mean_loss": numpy.mean([child.mean_loss for child in children]),
+            "p_variance_loss": numpy.mean([child.variance_loss for child in children]),
             "test_acc": test_acc,
             "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
@@ -203,7 +217,7 @@ def train_ea_batch(model_factory, optimizer_factory, criterion_factory, train_lo
 
     return best_model
 
-def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
+def train_ea_batch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
                    device: torch.device, generations: int, offspring: int, decay_rate: float, minibatch_budget: int):
 
@@ -220,15 +234,17 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
         best_model.index = 0
 
         children = []
-        for idx in range(offspring):
+        for idx in range(offspring + 1):
             child = model_factory().to(device)
             child.load_state_dict(best_model.state_dict())
 
-            child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
+            if idx:
+                child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
             child.train()
 
             child.index = idx + 1
             child.mean_loss = 0.0
+            child.variance_loss = 0.0
 
             optimizer = optimizer_factory(child)
             for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
@@ -241,6 +257,7 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
 
                 with torch.no_grad():
                     child.mean_loss += loss.mean().item()
+                    child.variance_loss += loss.var().item()
                     total_batches += 1
 
                 optimizer.zero_grad()
@@ -249,6 +266,7 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
                 optimizer.step()
 
             child.mean_loss /= minibatch_budget
+            child.variance_loss /= minibatch_budget
             total_batches += minibatch_budget
             children.append(child)
 
@@ -256,14 +274,8 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
         children.sort(key=lambda c: c.mean_loss)
 
         # pick winner
-        selected_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
-
-        # update indicator
-        did_not_improve = True if best_model.mean_loss <= selected_model.mean_loss else False
-        indicator = 1.0 if did_not_improve else 0.0
-
-        # store winner
-        best_model = selected_model
+        best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
+        indicator = 1.0 if best_model.index == 1 else 0.0
 
         # log stats
         test_acc = evaluate(best_model, test_loader, device)
@@ -278,6 +290,9 @@ def train_ea_batch_v2(model_factory, optimizer_factory, criterion_factory, train
             "survivor": best_model.index,
             "indicator": indicator,
             "mean_loss": best_model.mean_loss,
+            "variance_loss": best_model.variance_loss,
+            "p_mean_loss": numpy.mean([child.mean_loss for child in children]),
+            "p_variance_loss": numpy.mean([child.variance_loss for child in children]),
             "test_acc": test_acc,
             "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
@@ -317,6 +332,7 @@ if __name__ == "__main__":
 
     model_factory = lambda: utilities.resolve_class(settings.model["type"])(**settings.model["kwargs"])
     optimizer_factory = lambda x: utilities.resolve_class(settings.optimizer["type"])(x.parameters(), **settings.optimizer["kwargs"])
+    lr_decay_factory = lambda x, **kwargs: utilities.resolve_class(settings.lr_decay["type"])(x, **settings.lr_decay["kwargs"], **kwargs) if settings.lr_decay is not None else None
     criterion_factory = lambda: utilities.resolve_class(settings.criterion["type"])(**settings.criterion["kwargs"])
 
     warmup = utilities.resolve_class(settings.warmup["type"])(dataset=train_loader, **settings.warmup["kwargs"])
@@ -331,4 +347,4 @@ if __name__ == "__main__":
             decay.append(utilities.resolve_class(entry["type"])(**entry["kwargs"]))
 
     # instantiate experiment handle and call it
-    mode = globals()[settings.mode["type"]](model_factory, optimizer_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, decay_strategy=decay, **settings.mode["kwargs"])
+    mode = globals()[settings.mode["type"]](model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, decay_strategy=decay, **settings.mode["kwargs"])
