@@ -206,6 +206,7 @@ class TinyImageNet(dataset.i_dataset.IDataset):
         transform = torchvision.transforms.Compose([
             torchvision.transforms.Resize(self.resize),
             torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
             self.corruption,
             torchvision.transforms.Lambda(lambda x: torch.flatten(x)) if self.flatten else torchvision.transforms.Lambda(lambda x: x)  # needed for CNNs
         ])
