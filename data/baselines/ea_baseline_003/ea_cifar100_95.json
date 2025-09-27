@@ -1,0 +1,13 @@
+{
+  "log": "./data/logs/cifar100/ea_baseline_003/95/LOG_IDENTIFIER",
+  "model": {"type": "mask.network.SparseANN", "kwargs": {"in_features": 3072, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 100, "sparsity": 0.95, "act": "relu", "layernorm": true}},
+  "dataset": {"type": "dataset.cifar100.CIFAR100", "kwargs": {"train_batch": 128, "test_batch": 512, "resize": [32, 32], "flatten": true, "preload": true, "device": "DEVICE_LOCATION"}},
+  "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.005, "momentum": 0.0, "weight_decay": 0.00025}},
+  "lr_decay": {"type": "torch.optim.lr_scheduler.ExponentialLR", "kwargs": {"gamma": 0.985}},
+  "criterion": {"type": "torch.nn.CrossEntropyLoss", "kwargs": {"reduction": "none"}},
+  "warmup": {"type": "mask.warmup.NullWarmup", "kwargs": {}},
+  "pruning": {"type": "mask.pruning.MagnitudePruning", "kwargs": {"pruned_fraction": 0.03, "decay_rate": null}},
+  "regrowth": {"type": "mask.regrowth.UniformRegrowth", "kwargs": {}},
+  "decay": {"type": "mask.decay.NullDecay", "kwargs": {}},
+  "mode": {"type": "train_ea_batch", "kwargs": {"device": "DEVICE_LOCATION", "generations": 300, "offspring": 10, "decay_rate": null, "minibatch_budget": 64}}
+}
