@@ -1,0 +1,7 @@
+[
+  {"type": "dataset.cifar10.CIFAR10", "kwargs": {"train_batch": 1, "test_batch": 1, "resize": [32, 32], "flatten": true, "preload": false, "device": "cpu"}},
+  {"type": "dataset.cifar100.CIFAR100", "kwargs": {"train_batch": 1, "test_batch": 1, "resize": [32, 32], "flatten": true, "preload": false, "device": "cpu"}},
+  {"type": "dataset.fashion_mnist.FashionMNIST", "kwargs": {"train_batch": 1, "test_batch": 1, "resize": [28, 28], "flatten": true, "preload": false, "device": "cpu"}},
+  {"type": "dataset.stl10.STL10", "kwargs": {"train_batch": 1, "test_batch": 1, "resize": [64, 64], "flatten": true, "preload": false, "device": "cpu"}},
+  {"type": "dataset.tiny_imagenet.TinyImageNet", "kwargs": {"train_batch": 1, "test_batch": 1, "resize": [64, 64], "flatten": true, "preload": false, "device": "cpu"}}
+]
