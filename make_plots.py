@@ -152,6 +152,11 @@ if __name__ == "__main__":
     plt.tight_layout()
 
     if args.save_to is not None:
+
+        directory = os.path.dirname(args.save_to)
+        if not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+
         plt.savefig(args.save_to)
         plt.close()
     else:
