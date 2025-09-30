@@ -1,6 +1,6 @@
 {
-  "log": "./data/logs/stl10/ea_baseline_03_40/95/LOG_IDENTIFIER",
-  "model": {"type": "mask.network.SparseANN", "kwargs": {"in_features": 12288, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 10, "sparsity": 0.95, "act": "relu", "layernorm": true}},
+  "log": "./data/logs/stl10/dst_03/80/LOG_IDENTIFIER",
+  "model": {"type": "mask.network.SparseANN", "kwargs": {"in_features": 12288, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 10, "sparsity": 0.80, "act": "relu", "layernorm": true}},
   "dataset": {"type": "dataset.stl10.STL10", "kwargs": {"train_batch": 128, "test_batch": 512, "resize": [64, 64], "flatten": true, "preload": true, "device": "DEVICE_LOCATION"}},
   "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.005, "momentum": 0.0, "weight_decay": 0.00025}},
   "lr_decay": {"type": "torch.optim.lr_scheduler.ExponentialLR", "kwargs": {"gamma": 0.985}},
@@ -9,5 +9,5 @@
   "pruning": {"type": "mask.pruning.MagnitudePruning", "kwargs": {"pruned_fraction": 0.3, "decay_rate": null}},
   "regrowth": {"type": "mask.regrowth.UniformRegrowth", "kwargs": {}},
   "decay": {"type": "mask.decay.NullDecay", "kwargs": {}},
-  "mode": {"type": "train_ea_batch", "kwargs": {"device": "DEVICE_LOCATION", "generations": 300, "offspring": 40, "decay_rate": null, "minibatch_budget": 64}}
+  "mode": {"type": "train_sgd_batch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 300, "minibatch_budget": 64}}
 }
