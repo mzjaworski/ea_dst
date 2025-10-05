@@ -90,6 +90,7 @@ if __name__ == "__main__":
     parser.add_argument('--needles', default='["loss"]', type=json.loads, help="fields to extract from logs")
     parser.add_argument('--save_to', default=None, type=str, help="optional place to save current plot")
     parser.add_argument('--ci', default=True, type=bool, action=argparse.BooleanOptionalAction, help='plot ci or not')
+    parser.add_argument('--dpi', default=300, type=int, help='dots per inch (dpi) of the image')
 
     # parse args
     args = parser.parse_args()
@@ -100,7 +101,7 @@ if __name__ == "__main__":
     if len(args.needles) > 2:
         raise RuntimeError("currently at most two needles are supported!")
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(10, 5), dpi=args.dpi)
 
     xlabel = args.needles[1] if len(args.needles) > 1 else "epochs"
     ylabel = args.needles[0]
@@ -157,7 +158,7 @@ if __name__ == "__main__":
         if not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
 
-        plt.savefig(args.save_to)
+        plt.savefig(args.save_to, dpi=args.dpi)
         plt.close()
     else:
         plt.show()
