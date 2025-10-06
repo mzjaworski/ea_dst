@@ -91,9 +91,11 @@ if __name__ == "__main__":
     parser.add_argument('--save_to', default=None, type=str, help="optional place to save current plot")
     parser.add_argument('--ci', default=True, type=bool, action=argparse.BooleanOptionalAction, help='plot ci or not')
     parser.add_argument('--dpi', default=300, type=int, help='dots per inch (dpi) of the image')
+    parser.add_argument('--range', default='null', type=str, help='range of values to plot')
 
     # parse args
     args = parser.parse_args()
+    args.range = json.loads(args.range)
 
     if not len(args.needles):
         raise RuntimeError("nothing to plot!")
@@ -133,7 +135,13 @@ if __name__ == "__main__":
                 raise RuntimeError(f"couldn't match any '{needle}' in the specified directories {group_files}")
             
             mean, lower_bound, upper_bound = average_with_confidence(matches, confidence=0.95)
-            
+
+            if args.range is not None:
+                lower, upper = args.range
+                mean = mean[lower:upper]
+                lower_bound = lower_bound[lower:upper]
+                upper_bound = upper_bound[lower:upper]
+
             means.append(mean)
             lower_bounds.append(lower_bound)
             upper_bounds.append(upper_bound)
