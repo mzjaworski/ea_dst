@@ -159,9 +159,9 @@ class SparseCNN(torch.nn.Module):
         # fully connected layer before output
         layers.append(torch.nn.AdaptiveAvgPool2d(1))
         layers.append(torch.nn.Flatten())
-        layers.append(torch.nn.Linear(hidden_channels, hidden_channels))
+        layers.append(MaskedLayer(torch.nn.Linear(hidden_channels, hidden_channels), sparsity))
         layers.append(act_fn())
-        layers.append(torch.nn.Linear(hidden_channels, num_classes))
+        layers.append(MaskedLayer(torch.nn.Linear(hidden_channels, num_classes), sparsity))
 
         self.model = torch.nn.Sequential(*layers)
 
