@@ -93,7 +93,7 @@ if __name__ == "__main__":
     parser.add_argument('--formatters', default='[null, null]', type=json.loads, help="optional formatters for x and y axis")
     parser.add_argument('--save_to', default=None, type=str, help="optional place to save current plot")
     parser.add_argument('--ci', default=True, type=bool, action=argparse.BooleanOptionalAction, help='plot ci or not')
-    parser.add_argument('--dpi', default=300, type=int, help='dots per inch (dpi) of the image')
+    parser.add_argument('--dpi', default=100, type=int, help='dots per inch (dpi) of the image')
     parser.add_argument('--range', default='null', type=str, help='range of values to plot')
 
     # parse args
