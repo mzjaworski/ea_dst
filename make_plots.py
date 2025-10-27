@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from typing import List, Tuple
 import scipy.stats
 import argparse
+import utilities
 import numpy
 import json
 import re
@@ -88,6 +89,8 @@ if __name__ == "__main__":
     parser.add_argument('--title', default=None, type=str, help="optional plot title")
     parser.add_argument('--groups', default='{"DST": [], "EA": []}', type=json.loads, help="groups of log files to use for plotting")
     parser.add_argument('--needles', default='["loss"]', type=json.loads, help="fields to extract from logs")
+    parser.add_argument('--labels', default='[null, null]', type=json.loads, help="optional labels that will override default x and y labels")
+    parser.add_argument('--formatters', default='[null, null]', type=json.loads, help="optional formatters for x and y axis")
     parser.add_argument('--save_to', default=None, type=str, help="optional place to save current plot")
     parser.add_argument('--ci', default=True, type=bool, action=argparse.BooleanOptionalAction, help='plot ci or not')
     parser.add_argument('--dpi', default=300, type=int, help='dots per inch (dpi) of the image')
@@ -103,14 +106,22 @@ if __name__ == "__main__":
     if len(args.needles) > 2:
         raise RuntimeError("currently at most two needles are supported!")
 
+    # make plot
     plt.figure(figsize=(10, 5), dpi=args.dpi)
 
+    # set default labels
     xlabel = args.needles[1] if len(args.needles) > 1 else "epochs"
     ylabel = args.needles[0]
 
+    # override labels is required
+    xlabel = xlabel if args.labels[0] is None else args.labels[0]
+    ylabel = ylabel if args.labels[1] is None else args.labels[1]
+
+    # update figure labels
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
 
+    # set title
     if args.title is None:
         args.title = f"{xlabel} - {ylabel}"
 
@@ -145,16 +156,24 @@ if __name__ == "__main__":
             means.append(mean)
             lower_bounds.append(lower_bound)
             upper_bounds.append(upper_bound)
-            
+
+        # ensure common format and plot data
         if len(means) == 1:
             means.append(list(range(len(means[0]))))
-        
+
         axis = plt.gca()
         axis.plot(means[1], means[0], label=group_name, linewidth=2)
-        
+
+        # set formatters
+        if args.formatters[0] is not None:
+            axis.xaxis.set_major_formatter(utilities.resolve_class(args.formatters[0])())
+
+        if args.formatters[1] is not None:
+            axis.yaxis.set_major_formatter(utilities.resolve_class(args.formatters[1])())
+
+        # plot CI intervals
         if args.ci and len(lower_bounds) and len(upper_bounds):
             axis.fill_between(means[1], lower_bounds[0], upper_bounds[0], color=axis.lines[-1].get_color(), alpha=0.35)
-        
 
     plt.grid(True)
     plt.legend()
