@@ -144,6 +144,8 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
     total_batches = 0
     indicator = 1.0
 
+    rng = numpy.random.default_rng(seed=args.seed)
+
     for gen in range(1, generations + 1):
         pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
         best_model.index = 0
@@ -161,6 +163,13 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
             child.variance_loss = 0.0
 
             optimizer = optimizer_factory(child)
+            lr_decay = lr_decay_factory(optimizer)
+
+            if lr_decay is not None:
+                optimizer.step() # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+                for _ in range(1, gen): # decay learning rate
+                    lr_decay.step()
+
             for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
                 if batch_index >= minibatch_budget:
                     break
@@ -247,6 +256,13 @@ def train_ea_batch_v2(model_factory, optimizer_factory, lr_decay_factory, criter
             child.variance_loss = 0.0
 
             optimizer = optimizer_factory(child)
+            lr_decay = lr_decay_factory(optimizer)
+
+            if lr_decay is not None:
+                optimizer.step() # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+                for _ in range(1, gen): # decay learning rate
+                    lr_decay.step()
+
             for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
                 if batch_index >= minibatch_budget:
                     break
