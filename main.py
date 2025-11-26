@@ -144,8 +144,6 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
     total_batches = 0
     indicator = 1.0
 
-    rng = numpy.random.default_rng(seed=args.seed)
-
     for gen in range(1, generations + 1):
         pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
         best_model.index = 0
@@ -162,102 +160,6 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
             child.load_state_dict(best_model.state_dict())
 
             child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
-            child.train()
-
-            child.index = idx + 1
-            child.mean_loss = 0.0
-            child.variance_loss = 0.0
-
-            optimizer = optimizer_factory(child)
-            lr_decay = lr_decay_factory(optimizer)
-
-            if lr_decay is not None:
-                optimizer.step() # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
-                for _ in range(1, gen): # decay learning rate
-                    lr_decay.step()
-
-            for (inputs, targets) in generation_batch:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = child(inputs)
-                loss = criterion(outputs, targets)
-
-                with torch.no_grad():
-                    child.mean_loss += loss.mean().item()
-                    child.variance_loss += loss.var().item()
-                    total_batches += 1
-
-                optimizer.zero_grad()
-                loss.mean().backward()
-
-                optimizer.step()
-
-            child.mean_loss /= minibatch_budget
-            child.variance_loss /= minibatch_budget
-            total_batches += minibatch_budget
-            children.append(child)
-
-        # sort based on fitness
-        children.sort(key=lambda c: c.mean_loss)
-
-        # pick winner
-        best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
-        indicator = 1.0 if best_model.index == 1 else 0.0
-
-        # log stats
-        test_acc = evaluate(best_model, test_loader, device)
-        expected_sparsity = best_model.expected_sparsity()
-        realized_sparsity = best_model.realized_sparsity()
-        active_weights = best_model.active_weights()
-        total_weights = best_model.total_weights()
-
-        settings.logger.log({
-            "epoch": gen,
-            "batches": total_batches,
-            "survivor": best_model.index,
-            "indicator": indicator,
-            "mean_loss": best_model.mean_loss,
-            "variance_loss": best_model.variance_loss,
-            "p_mean_loss": numpy.mean([child.mean_loss for child in children]),
-            "p_variance_loss": numpy.mean([child.variance_loss for child in children]),
-            "test_acc": test_acc,
-            "pruned_fraction": pruned_fraction,
-            "expected_sparsity": expected_sparsity,
-            "realized_sparsity": realized_sparsity,
-            "active_weights": active_weights,
-            "total_weights": total_weights
-        })
-
-    return best_model
-
-def train_ea_batch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
-                   warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
-                   device: torch.device, generations: int, offspring: int, decay_rate: float, minibatch_budget: int):
-
-    best_model = model_factory().to(device)
-    criterion = criterion_factory()
-    best_model.index = 1
-
-    best_model.mean_loss = float("inf")
-    total_batches = 0
-    indicator = 1.0
-
-    for gen in range(1, generations + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
-        best_model.index = 0
-
-        generation_batch = [None for _ in range(minibatch_budget)]
-        for batch_index, batch in enumerate(cycle(train_loader)):
-            if batch_index >= minibatch_budget:
-                break
-            generation_batch[batch_index] = batch
-
-        children = []
-        for idx in range(offspring + 1):
-            child = model_factory().to(device)
-            child.load_state_dict(best_model.state_dict())
-
-            if idx:
-                child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
             child.train()
 
             child.index = idx + 1
