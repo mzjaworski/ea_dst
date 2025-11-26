@@ -67,7 +67,7 @@ class SparseANN(torch.nn.Module):
             layers.append(act_f())
 
         # output layer
-        layers.append(torch.nn.Linear(hidden_dim, num_classes))
+        layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, num_classes), sparsity))
 
         self.model = torch.nn.Sequential(*layers)
 
@@ -113,7 +113,7 @@ class DenseANNFromSparseANN(torch.nn.Module):
             layers.append(act_f())
 
         # output layer
-        layers.append(torch.nn.Linear(neuron_count, num_classes))
+        layers.append(MaskedLayer(torch.nn.Linear(neuron_count, num_classes), 0.0))
 
         self.model = torch.nn.Sequential(*layers)
 

@@ -150,6 +150,12 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
         pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
         best_model.index = 0
 
+        generation_batch = [None for _ in range(minibatch_budget)]
+        for batch_index, batch in enumerate(cycle(train_loader)):
+            if batch_index >= minibatch_budget:
+                break
+            generation_batch[batch_index] = batch
+
         children = []
         for idx in range(offspring):
             child = model_factory().to(device)
@@ -170,10 +176,7 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
                 for _ in range(1, gen): # decay learning rate
                     lr_decay.step()
 
-            for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
-                if batch_index >= minibatch_budget:
-                    break
-
+            for (inputs, targets) in generation_batch:
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = child(inputs)
                 loss = criterion(outputs, targets)
@@ -242,6 +245,12 @@ def train_ea_batch_v2(model_factory, optimizer_factory, lr_decay_factory, criter
         pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
         best_model.index = 0
 
+        generation_batch = [None for _ in range(minibatch_budget)]
+        for batch_index, batch in enumerate(cycle(train_loader)):
+            if batch_index >= minibatch_budget:
+                break
+            generation_batch[batch_index] = batch
+
         children = []
         for idx in range(offspring + 1):
             child = model_factory().to(device)
@@ -263,10 +272,7 @@ def train_ea_batch_v2(model_factory, optimizer_factory, lr_decay_factory, criter
                 for _ in range(1, gen): # decay learning rate
                     lr_decay.step()
 
-            for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
-                if batch_index >= minibatch_budget:
-                    break
-
+            for (inputs, targets) in generation_batch:
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = child(inputs)
                 loss = criterion(outputs, targets)
