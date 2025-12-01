@@ -45,19 +45,18 @@ def evaluate(model: torch.nn.Module, testloader: DataLoader, device: torch.devic
     return 100 * correct / total
 
 def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
+    data_count = len(candidates)
 
-    if decay_rate is None:
+    if decay_rate is None or data_count <= 1:
         return candidates[:select]
 
-    num_candidates = len(candidates)
-    candidate_indices = numpy.arange(num_candidates)
-
-    percentiles = candidate_indices / (num_candidates - 1) if num_candidates > 1 else numpy.zeros(1)
+    candidate_indices = numpy.arange(data_count)
+    percentiles = candidate_indices / (data_count - 1)
 
     weights = numpy.exp(-decay_rate * percentiles)
     probabilities = weights / weights.sum()
-    selected_indices = numpy.random.choice(num_candidates, size=select, replace=False, p=probabilities)
 
+    selected_indices = numpy.random.choice(data_count, size=select, replace=False, p=probabilities)
     return [candidates[i] for i in selected_indices]
 
 def train_sgd_batch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
@@ -101,7 +100,6 @@ def train_sgd_batch(model_factory, optimizer_factory, lr_decay_factory, criterio
 
             optimizer.zero_grad()
             loss.mean().backward()
-
             optimizer.step()
 
         total_mean /= minibatch_budget
@@ -138,9 +136,10 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
 
     best_model = model_factory().to(device)
     criterion = criterion_factory()
-    best_model.index = 1
 
+    best_model.index = 1
     best_model.mean_loss = float("inf")
+
     total_batches = 0
     indicator = 1.0
 
@@ -148,12 +147,14 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
         pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
         best_model.index = 0
 
+        # preload all data used within this generation
         generation_batch = [None for _ in range(minibatch_budget)]
         for batch_index, batch in enumerate(cycle(train_loader)):
             if batch_index >= minibatch_budget:
                 break
             generation_batch[batch_index] = batch
 
+        # generate and evaluate offspring
         children = []
         for idx in range(offspring):
             child = model_factory().to(device)
@@ -169,11 +170,13 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
             optimizer = optimizer_factory(child)
             lr_decay = lr_decay_factory(optimizer)
 
+            # adjust learning rate
             if lr_decay is not None:
                 optimizer.step() # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
                 for _ in range(1, gen): # decay learning rate
                     lr_decay.step()
 
+            # train child
             for (inputs, targets) in generation_batch:
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = child(inputs)
@@ -186,7 +189,6 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
 
                 optimizer.zero_grad()
                 loss.mean().backward()
-
                 optimizer.step()
 
             child.mean_loss /= minibatch_budget
