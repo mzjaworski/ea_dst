@@ -21,25 +21,34 @@ class UniformRegrowth(Regrowth):
         weight = layer.layer.weight.data
         mask = layer.mask.data
 
+        flat_weight = weight.view(-1)
         flat_mask = mask.view(-1)
 
+        # get indices of inactive elements
         inactive_idx = (flat_mask == 0).nonzero(as_tuple=True)[0]
         if inactive_idx.numel() == 0:
             return layer
 
-        # regrow connections with uniform probability
+        # pick their random subset
         perm = torch.randperm(inactive_idx.size(0), device=inactive_idx.device)
         grow = inactive_idx[perm[:pruned_count]]
-        flat_mask[grow] = True
 
-        flat_weight = weight.view(-1)
-        new_w = flat_weight[flat_mask.to(torch.bool)]
-        norm = new_w.norm() if new_w.numel() else 1.0
-        std = norm / (new_w.numel() ** 0.5)
-        torch.nn.init.normal_(flat_weight[grow], std=std)
+        # compute statistics for regrowing
+        current_active_bool = (flat_mask != 0).to(torch.bool)
+        existing_weights = flat_weight[current_active_bool]
+        std = float(existing_weights.std(unbiased=False))
+        std = 1e-2 if std == 0.0 else std # handle edge case
+
+        # update mask + weights
+        flat_mask[grow] = 1
+        flat_weight[grow] = torch.nn.init.normal_(flat_weight[grow], mean=0.0, std=std)
+
+        # write back - sanity check as it should work without it too
         layer.mask.data = flat_mask.view_as(mask)
+        layer.layer.weight.data = flat_weight.view_as(weight)
 
         return layer
+
 
 class GradientRegrowth(Regrowth):
 
@@ -54,10 +63,11 @@ class GradientRegrowth(Regrowth):
             raise RuntimeError("Gradient of the weights is required for GradientRegrowth, but it is None.")
 
         grad = weight.grad.data
+
         flat_grad = grad.view(-1)
         flat_mask = original_mask.view(-1)
 
-        # identify inactive (pruned) weights
+        # get indices of inactive elements
         inactive_idx = (flat_mask == 0).nonzero(as_tuple=True)[0]
         if inactive_idx.numel() == 0:
             return layer
@@ -73,7 +83,7 @@ class GradientRegrowth(Regrowth):
         sel_mask = mask.utilities.soft_top_k(sorted_scores, select=pruned_count, decay_rate=self.decay_rate)
         grow = sorted_indices[sel_mask]
 
-        # regrow these weights
+        # update mask + weights
         flat_mask[grow] = 1
         weight.data.view(-1)[grow] = 0.0
         layer.mask.data = flat_mask.view_as(original_mask)
