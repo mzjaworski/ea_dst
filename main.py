@@ -77,9 +77,11 @@ def train_sgd_batch(model_factory, optimizer_factory, lr_decay_factory, criterio
         model.train()
         model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
 
-        # # TODO for debugging mask update rules
+        # TODO for debugging mask update rules
         # for name, param in model.named_parameters():
         #     if name == 'model.9.mask':
+        #         print(name, param)
+        #     if name == 'model.9.layer.weight':
         #         print(name, param)
 
         total_mean = 0.0
@@ -137,7 +139,7 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
     best_model = model_factory().to(device)
     criterion = criterion_factory()
 
-    best_model.index = 1
+    best_model.index = 0
     best_model.mean_loss = float("inf")
 
     total_batches = 0
@@ -201,7 +203,7 @@ def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion
 
         # pick winner
         best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
-        indicator = 1.0 if best_model.index == 1 else 0.0
+        indicator = 1.0 if best_model.index == 0 else 0.0
 
         # log stats
         test_acc = evaluate(best_model, test_loader, device)
