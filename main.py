@@ -16,6 +16,7 @@ import mask.decay
 import argparse
 import settings
 import utilities
+import random
 import sys
 
 def update_mask(model: torch.nn.Module, warmup_strategy: mask.warmup.Warmup, prunning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth) -> torch.nn.Module:
@@ -240,8 +241,13 @@ if __name__ == "__main__":
     # parse args
     args = parser.parse_args()
 
+    # tell CuDNN to pick only deterministic algorithms in the backend
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
     # seed rngs
     rng = numpy.random.default_rng(seed=args.seed)
+    random.seed(int(rng.integers(0, 2 ** 32 - 1)))
     numpy.random.seed(rng.integers(0, 2 ** 32 - 1))
     torch.manual_seed(rng.integers(0, 2 ** 32 - 1))
     torch.cuda.manual_seed(rng.integers(0, 2 ** 32 - 1))
