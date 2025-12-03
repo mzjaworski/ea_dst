@@ -244,6 +244,7 @@ if __name__ == "__main__":
     rng = numpy.random.default_rng(seed=args.seed)
     numpy.random.seed(rng.integers(0, 2 ** 32 - 1))
     torch.manual_seed(rng.integers(0, 2 ** 32 - 1))
+    torch.cuda.manual_seed(rng.integers(0, 2 ** 32 - 1))
 
     # if no pipeline is passed through command line, scan stdin
     if args.configuration is None:

@@ -33,15 +33,9 @@ class UniformRegrowth(Regrowth):
         perm = torch.randperm(inactive_idx.size(0), device=inactive_idx.device)
         grow = inactive_idx[perm[:pruned_count]]
 
-        # compute statistics for regrowing
-        current_active_bool = (flat_mask != 0).to(torch.bool)
-        existing_weights = flat_weight[current_active_bool]
-        std = float(existing_weights.std(unbiased=False))
-        std = 1e-2 if std == 0.0 else std # handle edge case
-
         # update mask + weights
         flat_mask[grow] = 1
-        flat_weight[grow] = torch.nn.init.normal_(flat_weight[grow], mean=0.0, std=std)
+        flat_weight[grow] = 0.0
 
         # write back - sanity check as it should work without it too
         layer.mask.data = flat_mask.view_as(mask)
@@ -86,6 +80,8 @@ class GradientRegrowth(Regrowth):
         # update mask + weights
         flat_mask[grow] = 1
         weight.data.view(-1)[grow] = 0.0
+
+        # write back - sanity check as it should work without it too
         layer.mask.data = flat_mask.view_as(original_mask)
 
         return layer
