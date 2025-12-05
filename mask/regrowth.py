@@ -3,6 +3,7 @@ import torch
 
 import mask.utilities
 import mask.network
+import mask.weight
 
 class Regrowth(ABC):
 
@@ -17,11 +18,12 @@ class NullRegrowth(Regrowth):
 
 class UniformRegrowth(Regrowth):
 
+    def __init__(self, weight_reinitialization: str = "xavier_uniform"):
+        self.reinitialization = mask.weight.Reinitialization.lookup(weight_reinitialization)
+
     def apply(self, pruned_count: int, layer: mask.network.MaskedLayer) -> mask.network.MaskedLayer:
-        weight = layer.layer.weight.data
         mask = layer.mask.data
 
-        flat_weight = weight.view(-1)
         flat_mask = mask.view(-1)
 
         # get indices of inactive elements
@@ -33,21 +35,19 @@ class UniformRegrowth(Regrowth):
         perm = torch.randperm(inactive_idx.size(0), device=inactive_idx.device)
         grow = inactive_idx[perm[:pruned_count]]
 
-        # update mask + weights
+        # update mask
         flat_mask[grow] = 1
-        flat_weight[grow] = 0.0
 
-        # write back - sanity check as it should work without it too
         layer.mask.data = flat_mask.view_as(mask)
-        layer.layer.weight.data = flat_weight.view_as(weight)
+        layer.layer.weight.data = self.reinitialization(layer.layer.weight.data, grow)
 
         return layer
 
-
 class GradientRegrowth(Regrowth):
 
-    def __init__(self, decay_rate: float):
+    def __init__(self, decay_rate: float, weight_reinitialization: str = "zero"):
         self.decay_rate = decay_rate
+        self.reinitialization = mask.weight.Reinitialization.lookup(weight_reinitialization)
 
     def apply(self, pruned_count: int, layer: mask.network.MaskedLayer) -> mask.network.MaskedLayer:
         weight = layer.layer.weight
@@ -77,11 +77,10 @@ class GradientRegrowth(Regrowth):
         sel_mask = mask.utilities.soft_top_k(sorted_scores, select=pruned_count, decay_rate=self.decay_rate)
         grow = sorted_indices[sel_mask]
 
-        # update mask + weights
+        # update mask
         flat_mask[grow] = 1
-        weight.data.view(-1)[grow] = 0.0
 
-        # write back - sanity check as it should work without it too
         layer.mask.data = flat_mask.view_as(original_mask)
+        layer.layer.weight.data = self.reinitialization(weight.data, grow)
 
         return layer
