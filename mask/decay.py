@@ -49,6 +49,7 @@ class CosineDecayStrategy(DecayStrategy):
     def __init__(self, factor: float, decay_over: int, eta_min: float = 0.0, last_epoch: int = -1):
         self.optim = torch.optim.SGD(torch.nn.ParameterList([torch.nn.Parameter(torch.zeros(1))]), lr=factor)
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, decay_over, eta_min, last_epoch)
+        self.optim.step() # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
 
     def update(self, value: float) -> Self:
         self.scheduler.step()
