@@ -88,6 +88,35 @@ class SparseANN(torch.nn.Module):
     def forward(self, x):
         return self.model(x)
 
+class AmazingSparseANN(torch.nn.Module):
+    def __init__(self, in_features: int, num_classes: int, sparsity: float):
+        super().__init__()
+        self.model = torch.nn.Sequential(*[
+            MaskedLayer(torch.nn.Linear(in_features, 1024, bias=False), sparsity),
+            torch.nn.ReLU(),
+            MaskedLayer(torch.nn.Linear(1024, 512, bias=False), sparsity),
+            torch.nn.ReLU(),
+            MaskedLayer(torch.nn.Linear(512, num_classes, bias=False), sparsity)
+        ])
+
+    def expected_sparsity(self) -> float:
+        data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def realized_sparsity(self) -> float:
+        data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def active_weights(self) -> int:
+        return sum([layer.active_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+
+    def total_weights(self) -> int:
+        return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+
+    def forward(self, x):
+        return self.model(x)
+
+
 class DenseANNFromSparseANN(torch.nn.Module):
     def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
         super().__init__()

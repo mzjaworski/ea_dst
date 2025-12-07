@@ -60,6 +60,81 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     selected_indices = numpy.random.choice(data_count, size=select, replace=False, p=probabilities)
     return [candidates[i] for i in selected_indices]
 
+def train_sgd_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
+                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
+                    device: torch.device, epochs: int, minibatch_budget: int):
+    model = model_factory()
+    optimizer = optimizer_factory(model)
+    lr_decay = lr_decay_factory(optimizer)
+    criterion = criterion_factory()
+    total_batches = 0
+
+    model.train()
+    model.to(device)
+
+    for epoch in range(1, epochs + 1):
+
+        total_mean = 0.0
+        total_variance = 0.0
+        pruned_fraction = 0.0
+        batch_index = 0
+
+        for (inputs, targets) in train_loader:
+            model.train()
+
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+
+            with torch.no_grad():
+                total_mean += loss.mean().item()
+                total_variance += loss.var().item()
+                total_batches += 1
+                batch_index += 1
+
+            optimizer.zero_grad()
+            loss.mean().backward()
+            optimizer.step()
+
+            if total_batches % minibatch_budget == 0 and total_batches > 0:
+                model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
+                pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
+
+                # # TODO for debugging mask update rules
+                # for name, param in model.named_parameters():
+                #     if name == 'model.9.mask':
+                #         print(name, param)
+                #     if name == 'model.9.layer.weight':
+                #         print(name, param)
+
+        total_mean /= batch_index
+        total_variance /= batch_index
+
+        # log stats
+        acc = evaluate(model, test_loader, device)
+        expected_sparsity = model.expected_sparsity()
+        realized_sparsity = model.realized_sparsity()
+        active_weights = model.active_weights()
+        total_weights = model.total_weights()
+
+        if lr_decay is not None:
+            lr_decay.step()
+
+        settings.logger.log({
+            "epoch": epoch,
+            "batches": total_batches,
+            "mean_loss": total_mean,
+            "variance_loss": total_variance,
+            "test_acc": acc,
+            "pruned_fraction": pruned_fraction,
+            "expected_sparsity": expected_sparsity,
+            "realized_sparsity": realized_sparsity,
+            "active_weights": active_weights,
+            "total_weights": total_weights
+        })
+
+    return model
+
 def train_sgd_batch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                     warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
                     device: torch.device, epochs: int, minibatch_budget: int):
