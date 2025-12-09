@@ -60,89 +60,10 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     selected_indices = numpy.random.choice(data_count, size=select, replace=False, p=probabilities)
     return [candidates[i] for i in selected_indices]
 
-def train_sgd_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
-                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
-                    device: torch.device, epochs: int, minibatch_budget: int):
-    model = model_factory()
-    optimizer = optimizer_factory(model)
-    lr_decay = lr_decay_factory(optimizer)
+def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
+                warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
+                device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
     criterion = criterion_factory()
-    total_batches = 0
-
-    model.train()
-    model.to(device)
-
-    for epoch in range(1, epochs + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
-
-        total_mean = 0.0
-        total_variance = 0.0
-        batch_index = 0
-
-        for (inputs, targets) in train_loader:
-            model.train()
-
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-
-            with torch.no_grad():
-                total_mean += loss.mean().item()
-                total_variance += loss.var().item()
-                total_batches += 1
-                batch_index += 1
-
-            optimizer.zero_grad()
-            loss.mean().backward()
-            optimizer.step()
-
-            if total_batches % minibatch_budget == 0 and total_batches > 0:
-                model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
-
-                # # TODO for debugging mask update rules
-                # for name, param in model.named_parameters():
-                #     if name == 'model.9.mask':
-                #         print(name, param)
-                #     if name == 'model.9.layer.weight':
-                #         print(name, param)
-
-        total_mean /= batch_index
-        total_variance /= batch_index
-
-        # log stats
-        acc = evaluate(model, test_loader, device)
-        expected_sparsity = model.expected_sparsity()
-        realized_sparsity = model.realized_sparsity()
-        active_weights = model.active_weights()
-        total_weights = model.total_weights()
-
-        if lr_decay is not None:
-            lr_decay.step()
-
-        settings.logger.log({
-            "epoch": epoch,
-            "batches": total_batches,
-            "mean_loss": total_mean,
-            "variance_loss": total_variance,
-            "test_acc": acc,
-            "pruned_fraction": pruned_fraction,
-            "expected_sparsity": expected_sparsity,
-            "realized_sparsity": realized_sparsity,
-            "active_weights": active_weights,
-            "total_weights": total_weights
-        })
-
-    return model
-
-def train_ea_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
-                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
-                    device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
-    best_model = model_factory().to(device)
-    criterion = criterion_factory()
-
-    best_model.index = 0
-    best_model.mean_loss = float("inf")
-    best_model.seen_batches = float("inf")
     total_batches = 0
 
     children = []
@@ -159,14 +80,16 @@ def train_ea_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion
 
             # update population
             if (total_batches / offspring) % minibatch_budget == 0:
+                best_model = None
 
                 # pick best model
                 if len(children):
                     children.sort(key=lambda c: c.mean_loss / c.seen_batches)
-                    print([child.mean_loss / child.seen_batches for child in children])
+                    # print([child.mean_loss / child.seen_batches for child in children])
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
-                    best_model.index = 0
                     children = []
+                else:
+                    best_model = model_factory()
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
@@ -206,286 +129,23 @@ def train_ea_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion
                 loss.mean().backward()
                 child.optimizer.step()
 
+        children.sort(key=lambda c: c.mean_loss / c.seen_batches)
+
         # log stats
-        test_acc = evaluate(best_model, test_loader, device)
-        expected_sparsity = best_model.expected_sparsity()
-        realized_sparsity = best_model.realized_sparsity()
-        active_weights = best_model.active_weights()
-        total_weights = best_model.total_weights()
+        test_acc = evaluate(children[0], test_loader, device)
+        expected_sparsity = children[0].expected_sparsity()
+        realized_sparsity = children[0].realized_sparsity()
+        active_weights = children[0].active_weights()
+        total_weights = children[0].total_weights()
 
         settings.logger.log({
             "epoch": current_epoch,
             "batches": total_batches,
-            "survivor": best_model.index,
-            "mean_loss": best_model.mean_loss / best_model.seen_batches,
-            "variance_loss": best_model.variance_loss / best_model.seen_batches,
+            "survivor": children[0].index,
+            "mean_loss": children[0].mean_loss / children[0].seen_batches,
+            "variance_loss": children[0].variance_loss / children[0].seen_batches,
             "p_mean_loss": numpy.mean([child.mean_loss / child.seen_batches for child in children]),
             "p_variance_loss": numpy.mean([child.variance_loss / child.seen_batches for child in children]),
-            "test_acc": test_acc,
-            "pruned_fraction": pruned_fraction,
-            "expected_sparsity": expected_sparsity,
-            "realized_sparsity": realized_sparsity,
-            "active_weights": active_weights,
-            "total_weights": total_weights
-        })
-
-    return best_model
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    model = model_factory()
-    optimizer = optimizer_factory(model)
-    lr_decay = lr_decay_factory(optimizer)
-    criterion = criterion_factory()
-    total_batches = 0
-
-    model.train()
-    model.to(device)
-
-    for epoch in range(1, epochs + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
-
-        total_mean = 0.0
-        total_variance = 0.0
-        batch_index = 0
-
-        for (inputs, targets) in train_loader:
-            model.train()
-
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-
-            with torch.no_grad():
-                total_mean += loss.mean().item()
-                total_variance += loss.var().item()
-                total_batches += 1
-                batch_index += 1
-
-            optimizer.zero_grad()
-            loss.mean().backward()
-            optimizer.step()
-
-            if total_batches % minibatch_budget == 0 and total_batches > 0:
-                model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
-
-                # # TODO for debugging mask update rules
-                # for name, param in model.named_parameters():
-                #     if name == 'model.9.mask':
-                #         print(name, param)
-                #     if name == 'model.9.layer.weight':
-                #         print(name, param)
-
-        total_mean /= batch_index
-        total_variance /= batch_index
-
-        # log stats
-        acc = evaluate(model, test_loader, device)
-        expected_sparsity = model.expected_sparsity()
-        realized_sparsity = model.realized_sparsity()
-        active_weights = model.active_weights()
-        total_weights = model.total_weights()
-
-        if lr_decay is not None:
-            lr_decay.step()
-
-        settings.logger.log({
-            "epoch": epoch,
-            "batches": total_batches,
-            "mean_loss": total_mean,
-            "variance_loss": total_variance,
-            "test_acc": acc,
-            "pruned_fraction": pruned_fraction,
-            "expected_sparsity": expected_sparsity,
-            "realized_sparsity": realized_sparsity,
-            "active_weights": active_weights,
-            "total_weights": total_weights
-        })
-
-    return model
-
-
-def train_sgd_batch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
-                    warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
-                    device: torch.device, epochs: int, minibatch_budget: int):
-    model = model_factory()
-    optimizer = optimizer_factory(model)
-    lr_decay = lr_decay_factory(optimizer)
-    criterion = criterion_factory()
-    total_batches = 0
-
-    model.train()
-    model.to(device)
-
-    for epoch in range(1, epochs + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
-
-        model.train()
-        model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
-
-        # TODO for debugging mask update rules
-        # for name, param in model.named_parameters():
-        #     if name == 'model.9.mask':
-        #         print(name, param)
-        #     if name == 'model.9.layer.weight':
-        #         print(name, param)
-
-        total_mean = 0.0
-        total_variance = 0.0
-
-        for batch_index, (inputs, targets) in enumerate(cycle(train_loader)):
-            if batch_index >= minibatch_budget:
-                break
-
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-
-            with torch.no_grad():
-                total_mean += loss.mean().item()
-                total_variance += loss.var().item()
-                total_batches += 1
-
-            optimizer.zero_grad()
-            loss.mean().backward()
-            optimizer.step()
-
-        total_mean /= minibatch_budget
-        total_variance /= minibatch_budget
-
-        # log stats
-        acc = evaluate(model, test_loader, device)
-        expected_sparsity = model.expected_sparsity()
-        realized_sparsity = model.realized_sparsity()
-        active_weights = model.active_weights()
-        total_weights = model.total_weights()
-
-        if lr_decay is not None:
-            lr_decay.step()
-
-        settings.logger.log({
-            "epoch": epoch,
-            "batches": total_batches,
-            "mean_loss": total_mean,
-            "variance_loss": total_variance,
-            "test_acc": acc,
-            "pruned_fraction": pruned_fraction,
-            "expected_sparsity": expected_sparsity,
-            "realized_sparsity": realized_sparsity,
-            "active_weights": active_weights,
-            "total_weights": total_weights
-        })
-
-    return model
-
-def train_ea_batch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
-                   warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
-                   device: torch.device, generations: int, offspring: int, decay_rate: float, minibatch_budget: int):
-
-    best_model = model_factory().to(device)
-    criterion = criterion_factory()
-
-    best_model.index = 0
-    best_model.mean_loss = float("inf")
-
-    total_batches = 0
-    indicator = 1.0
-
-    for gen in range(1, generations + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(indicator))
-        best_model.index = 0
-
-        # preload all data used within this generation
-        generation_batch = [None for _ in range(minibatch_budget)]
-        for batch_index, batch in enumerate(cycle(train_loader)):
-            if batch_index >= minibatch_budget:
-                break
-            generation_batch[batch_index] = batch
-
-        # generate and evaluate offspring
-        children = []
-        for idx in range(offspring):
-            child = model_factory().to(device)
-            child.load_state_dict(best_model.state_dict())
-
-            child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
-            child.train()
-
-            child.index = idx + 1
-            child.mean_loss = 0.0
-            child.variance_loss = 0.0
-
-            optimizer = optimizer_factory(child)
-            lr_decay = lr_decay_factory(optimizer)
-
-            # adjust learning rate
-            if lr_decay is not None:
-                optimizer.step() # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
-                for _ in range(1, gen): # decay learning rate
-                    lr_decay.step()
-
-            # train child
-            for (inputs, targets) in generation_batch:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = child(inputs)
-                loss = criterion(outputs, targets)
-
-                with torch.no_grad():
-                    child.mean_loss += loss.mean().item()
-                    child.variance_loss += loss.var().item()
-                    total_batches += 1
-
-                optimizer.zero_grad()
-                loss.mean().backward()
-                optimizer.step()
-
-            child.mean_loss /= minibatch_budget
-            child.variance_loss /= minibatch_budget
-            total_batches += minibatch_budget
-            children.append(child)
-
-        # sort based on fitness
-        children.sort(key=lambda c: c.mean_loss)
-
-        # pick winner
-        best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
-        indicator = 1.0 if best_model.index == 0 else 0.0
-
-        # log stats
-        test_acc = evaluate(best_model, test_loader, device)
-        expected_sparsity = best_model.expected_sparsity()
-        realized_sparsity = best_model.realized_sparsity()
-        active_weights = best_model.active_weights()
-        total_weights = best_model.total_weights()
-
-        settings.logger.log({
-            "epoch": gen,
-            "batches": total_batches,
-            "survivor": best_model.index,
-            "indicator": indicator,
-            "mean_loss": best_model.mean_loss,
-            "variance_loss": best_model.variance_loss,
-            "p_mean_loss": numpy.mean([child.mean_loss for child in children]),
-            "p_variance_loss": numpy.mean([child.variance_loss for child in children]),
             "test_acc": test_acc,
             "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,
