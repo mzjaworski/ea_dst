@@ -218,7 +218,7 @@ class TinyImageNet(dataset.i_dataset.IDataset):
         trainset = TinyImageNetDataset(root_dir='./data', mode='train', transform=train_transform, download=True)
         testset = TinyImageNetDataset(root_dir='./data', mode='val', transform=test_transform, download=True) # test has no labels
 
-        train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.train_batch, shuffle=True, num_workers=0, pin_memory=True)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=self.test_batch, shuffle=False, num_workers=0, pin_memory=True)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.train_batch, shuffle=True, num_workers=6, pin_memory=True)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=self.test_batch, shuffle=False, num_workers=6, pin_memory=True)
 
         return train_loader, test_loader
