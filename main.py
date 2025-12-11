@@ -89,7 +89,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
                     children = []
                 else:
-                    best_model = model_factory()
+                    best_model = model_factory().to(device)
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
