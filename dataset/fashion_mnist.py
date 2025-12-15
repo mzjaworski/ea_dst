@@ -34,7 +34,7 @@ class FashionMNIST(dataset.i_dataset.IDataset):
         trainset = torchvision.datasets.FashionMNIST(root='./data', train=True, download=True, transform=train_transform)
         testset = torchvision.datasets.FashionMNIST(root='./data', train=False, download=True, transform=test_transform)
 
-        train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.train_batch, shuffle=True, num_workers=6, pin_memory=True)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=self.test_batch, shuffle=False, num_workers=6, pin_memory=True)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.train_batch, shuffle=True, num_workers=6, pin_memory=False)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=self.test_batch, shuffle=False, num_workers=6, pin_memory=False)
 
         return train_loader, test_loader
