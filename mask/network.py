@@ -46,58 +46,30 @@ class MaskedLayer(torch.nn.Module):
             return torch.nn.functional.conv2d(x, masked_weight, self.layer.bias, stride=self.layer.stride, padding=self.layer.padding, dilation=self.layer.dilation, groups=self.layer.groups)
         raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
-# class SparseANN(torch.nn.Module):
-#     def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
-#         super().__init__()
-#
-#         act_f = torch.nn.Tanh if act == "tanh" else torch.nn.ReLU
-#         norm = torch.nn.LayerNorm if layernorm else torch.nn.Identity
-#
-#         layers = []
-#
-#         # input layer
-#         layers.append(MaskedLayer(torch.nn.Linear(in_features, hidden_dim, bias=False), sparsity))
-#         layers.append(norm(hidden_dim))
-#         layers.append(act_f())
-#
-#         # hidden layers
-#         for _ in range(num_hidden_layers):
-#             layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, hidden_dim, bias=False), sparsity))
-#             layers.append(norm(hidden_dim))
-#             layers.append(act_f())
-#
-#         # output layer
-#         layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, num_classes), sparsity))
-#
-#         self.model = torch.nn.Sequential(*layers)
-#
-#     def expected_sparsity(self) -> float:
-#         data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
-#         return sum(data) / len(data)
-#
-#     def realized_sparsity(self) -> float:
-#         data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
-#         return sum(data) / len(data)
-#
-#     def active_weights(self) -> int:
-#         return sum([layer.active_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
-#
-#     def total_weights(self) -> int:
-#         return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
-#
-#     def forward(self, x):
-#         return self.model(x)
-
 class SparseANN(torch.nn.Module):
-    def __init__(self, in_features: int, num_classes: int, sparsity: float):
+    def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
         super().__init__()
-        self.model = torch.nn.Sequential(*[
-            MaskedLayer(torch.nn.Linear(in_features, 1024, bias=False), sparsity),
-            torch.nn.ReLU(),
-            MaskedLayer(torch.nn.Linear(1024, 512, bias=False), sparsity),
-            torch.nn.ReLU(),
-            MaskedLayer(torch.nn.Linear(512, num_classes, bias=False), sparsity)
-        ])
+
+        act_f = torch.nn.Tanh if act == "tanh" else torch.nn.ReLU
+        norm = torch.nn.LayerNorm if layernorm else torch.nn.Identity
+
+        layers = []
+
+        # input layer
+        layers.append(MaskedLayer(torch.nn.Linear(in_features, hidden_dim, bias=False), sparsity))
+        layers.append(norm(hidden_dim))
+        layers.append(act_f())
+
+        # hidden layers
+        for _ in range(num_hidden_layers):
+            layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, hidden_dim, bias=False), sparsity))
+            layers.append(norm(hidden_dim))
+            layers.append(act_f())
+
+        # output layer
+        layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, num_classes), sparsity))
+
+        self.model = torch.nn.Sequential(*layers)
 
     def expected_sparsity(self) -> float:
         data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
@@ -115,6 +87,34 @@ class SparseANN(torch.nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+# class SparseANN(torch.nn.Module):
+#     def __init__(self, in_features: int, num_classes: int, sparsity: float):
+#         super().__init__()
+#         self.model = torch.nn.Sequential(*[
+#             MaskedLayer(torch.nn.Linear(in_features, 1024, bias=False), sparsity),
+#             torch.nn.ReLU(),
+#             MaskedLayer(torch.nn.Linear(1024, 512, bias=False), sparsity),
+#             torch.nn.ReLU(),
+#             MaskedLayer(torch.nn.Linear(512, num_classes, bias=False), sparsity)
+#         ])
+#
+#     def expected_sparsity(self) -> float:
+#         data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+#         return sum(data) / len(data)
+#
+#     def realized_sparsity(self) -> float:
+#         data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
+#         return sum(data) / len(data)
+#
+#     def active_weights(self) -> int:
+#         return sum([layer.active_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+#
+#     def total_weights(self) -> int:
+#         return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
+#
+#     def forward(self, x):
+#         return self.model(x)
 
 
 class DenseANNFromSparseANN(torch.nn.Module):
