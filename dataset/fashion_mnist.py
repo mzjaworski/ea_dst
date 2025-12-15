@@ -17,7 +17,7 @@ class FashionMNIST(dataset.i_dataset.IDataset):
     def load(self) -> (torch.utils.data.DataLoader, torch.utils.data.DataLoader):
         train_transform = torchvision.transforms.Compose([
             torchvision.transforms.Resize(self.resize),
-            torchvision.transforms.RandomResizedCrop(self.resize),
+            torchvision.transforms.RandomCrop(self.resize),
             torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize((0.5,), (0.5,)),

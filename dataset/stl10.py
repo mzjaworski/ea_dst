@@ -17,7 +17,7 @@ class STL10(dataset.i_dataset.IDataset):
     def load(self):
         train_transform = torchvision.transforms.Compose([
             torchvision.transforms.Resize(self.resize),
-            torchvision.transforms.RandomResizedCrop(self.resize),
+            torchvision.transforms.RandomCrop(self.resize),
             torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),

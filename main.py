@@ -90,6 +90,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     children = []
                 else:
                     best_model = model_factory().to(device)
+                    best_model.optimizer = optimizer_factory(best_model) # ensure it exists for downstream task
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
@@ -105,12 +106,8 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                     child.train()
                     child.optimizer = optimizer_factory(child)
+                    child.optimizer.load_state_dict(best_model.optimizer.state_dict())
                     child.lr_decay = lr_decay_factory(child.optimizer)
-
-                    # decay learning rate to the desired level
-                    child.optimizer.step()  # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
-                    for _ in range(1, current_epoch):  # decay learning rate
-                        child.lr_decay.step()
 
                     children.append(child)
 
@@ -142,6 +139,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             "epoch": current_epoch,
             "batches": total_batches,
             "survivor": children[0].index,
+            "learning_rate": children[0].optimizer.param_groups[0]["lr"],
             "mean_loss": children[0].mean_loss / children[0].seen_batches,
             "variance_loss": children[0].variance_loss / children[0].seen_batches,
             "p_mean_loss": numpy.mean([child.mean_loss / child.seen_batches for child in children]),
@@ -154,7 +152,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             "total_weights": total_weights
         })
 
-    return best_model
+    return children[0]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')

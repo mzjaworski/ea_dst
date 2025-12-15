@@ -17,7 +17,7 @@ class CIFAR10(dataset.i_dataset.IDataset):
     def load(self) -> (torch.utils.data.DataLoader, torch.utils.data.DataLoader):
         train_transform = torchvision.transforms.Compose([
             torchvision.transforms.Resize(self.resize),
-            torchvision.transforms.RandomResizedCrop(self.resize),
+            torchvision.transforms.RandomCrop(self.resize),
             torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),
