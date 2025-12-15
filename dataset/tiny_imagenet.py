@@ -150,26 +150,39 @@ Members:
   label_data: Label data
 """
 class TinyImageNetDataset(Dataset):
-    def __init__(self, root_dir, mode='train', transform=None, download=False):
+    def __init__(self, root_dir, mode='train', transform=None, download=False, cache=False):
         tinp = TinyImageNetPaths(root_dir, download)
         self.mode = mode
+        self.cache = cache
         self.label_idx = 1  # from [image, id, nid, box]
         self.transform = transform
         self.transform_results = dict()
 
         self.samples = tinp.paths[mode]
         self.samples_num = len(self.samples)
-
+        
+        if self.cache:
+            self.cached_images = [None for _ in range(self.samples_num)]
+            for idx in range(self.samples_num):
+                sample = self.samples[idx]
+                img = _add_channels(imageio.imread(sample[0]))
+                img = PIL.Image.fromarray(img, mode="RGB")
+                label = None if self.mode == 'test' else torch.tensor(sample[self.label_idx])
+                self.cached_images[idx] = (img, label)
+                
     def __len__(self):
         return self.samples_num
 
     def __getitem__(self, idx):
-        try:
-            sample = self.samples[idx]
-            img = _add_channels(imageio.imread(sample[0]))
-            img = PIL.Image.fromarray(img, mode="RGB")
-            label = None if self.mode == 'test' else torch.tensor(sample[self.label_idx])
-
+        try:     
+            if self.cache:
+                (img, label) = self.cached_images[idx]
+            else:
+                sample = self.samples[idx]
+                img = _add_channels(imageio.imread(sample[0]))
+                img = PIL.Image.fromarray(img, mode="RGB")
+                label = None if self.mode == 'test' else torch.tensor(sample[self.label_idx])
+            
             if self.transform:
                 img = self.transform(img)
 
@@ -215,8 +228,8 @@ class TinyImageNet(dataset.i_dataset.IDataset):
             torchvision.transforms.Lambda(lambda x: torch.flatten(x)) if self.flatten else torchvision.transforms.Lambda(lambda x: x) # needed for CNNs
         ])
 
-        trainset = TinyImageNetDataset(root_dir='./data', mode='train', transform=train_transform, download=True)
-        testset = TinyImageNetDataset(root_dir='./data', mode='val', transform=test_transform, download=True) # test has no labels
+        trainset = TinyImageNetDataset(root_dir='./data', mode='train', transform=train_transform, download=True, cache=True)
+        testset = TinyImageNetDataset(root_dir='./data', mode='val', transform=test_transform, download=True, cache=True) # test has no labels
 
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.train_batch, shuffle=True, num_workers=6, pin_memory=True)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=self.test_batch, shuffle=False, num_workers=6, pin_memory=True)
