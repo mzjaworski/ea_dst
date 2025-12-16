@@ -2,7 +2,7 @@
   "log": "./data/logs/cifar100/zero/ea/magnitude_uniform/975/LOG_IDENTIFIER",
   "model": {"type": "mask.network.SparseANN", "kwargs": {"in_features": 3072, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 100, "sparsity": 0.975, "act": "relu", "layernorm": true}},
   "dataset": {"type": "dataset.cifar100.CIFAR100", "kwargs": {"train_batch": 128, "test_batch": 512, "resize": [32, 32], "flatten": true, "device": "DEVICE_LOCATION"}},
-  "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.005, "momentum": 0.9, "weight_decay": 0.0005, "nesterov": true}},
+  "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.005, "momentum": 0.0, "weight_decay": 0.0005}},
   "lr_decay": {"type": "torch.optim.lr_scheduler.ExponentialLR", "kwargs": {"gamma": 0.985}},
   "criterion": {"type": "torch.nn.CrossEntropyLoss", "kwargs": {"reduction": "none"}},
   "warmup": {"type": "mask.warmup.NullWarmup", "kwargs": {}},

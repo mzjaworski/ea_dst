@@ -2,7 +2,7 @@
   "log": "./data/logs/stl10/small_dense/975/LOG_IDENTIFIER",
   "model": {"type": "mask.network.DenseANNFromSparseANN", "kwargs": {"in_features": 12288, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 10, "sparsity": 0.975, "act": "relu", "layernorm": true}},
   "dataset": {"type": "dataset.stl10.STL10", "kwargs": {"train_batch": 128, "test_batch": 512, "resize": [64, 64], "flatten": true, "device": "DEVICE_LOCATION"}},
-  "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.005, "momentum": 0.9, "weight_decay": 0.0005, "nesterov": true}},
+  "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.005, "momentum": 0.0, "weight_decay": 0.0005}},
   "lr_decay": {"type": "torch.optim.lr_scheduler.ExponentialLR", "kwargs": {"gamma": 0.985}},
   "criterion": {"type": "torch.nn.CrossEntropyLoss", "kwargs": {"reduction": "none"}},
   "warmup": {"type": "mask.warmup.NullWarmup", "kwargs": {}},
