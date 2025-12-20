@@ -22,13 +22,17 @@ import sys
 def update_mask(model: torch.nn.Module, warmup_strategy: mask.warmup.Warmup, prunning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
 
+    # iterate over all layers
     for layer in model.model:
+        # we are interested only in custom MaskedLayers
         if not isinstance(layer, mask.network.MaskedLayer):
             continue
 
-        pruned_count, pruned_layer = prunning_strategy.apply(layer)
-        regrowth_strategy.apply(pruned_count, pruned_layer)
-        # not assigning back should be safe as we deal with references
+        # apply removal/regrowth only for layers that actually require it
+        if layer.expected_sparsity() > 0.0:
+            pruned_count, pruned_layer = prunning_strategy.apply(layer)
+            regrowth_strategy.apply(pruned_count, pruned_layer)
+            # not assigning back should be safe as we deal with references
 
     return model
 

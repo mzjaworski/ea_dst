@@ -61,7 +61,7 @@ class SparseANN(torch.nn.Module):
         layers.append(act_f())
 
         # hidden layers
-        for _ in range(num_hidden_layers):
+        for layer_index in range(num_hidden_layers):
             layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, hidden_dim, bias=False), sparsity))
             layers.append(norm(hidden_dim))
             layers.append(act_f())
@@ -87,35 +87,6 @@ class SparseANN(torch.nn.Module):
 
     def forward(self, x):
         return self.model(x)
-
-# class SparseANN(torch.nn.Module):
-#     def __init__(self, in_features: int, num_classes: int, sparsity: float):
-#         super().__init__()
-#         self.model = torch.nn.Sequential(*[
-#             MaskedLayer(torch.nn.Linear(in_features, 1024, bias=False), sparsity),
-#             torch.nn.ReLU(),
-#             MaskedLayer(torch.nn.Linear(1024, 512, bias=False), sparsity),
-#             torch.nn.ReLU(),
-#             MaskedLayer(torch.nn.Linear(512, num_classes, bias=False), sparsity)
-#         ])
-#
-#     def expected_sparsity(self) -> float:
-#         data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
-#         return sum(data) / len(data)
-#
-#     def realized_sparsity(self) -> float:
-#         data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
-#         return sum(data) / len(data)
-#
-#     def active_weights(self) -> int:
-#         return sum([layer.active_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
-#
-#     def total_weights(self) -> int:
-#         return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
-#
-#     def forward(self, x):
-#         return self.model(x)
-
 
 class DenseANNFromSparseANN(torch.nn.Module):
     def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
@@ -143,54 +114,6 @@ class DenseANNFromSparseANN(torch.nn.Module):
 
         # output layer
         layers.append(MaskedLayer(torch.nn.Linear(neuron_count, num_classes), 0.0))
-
-        self.model = torch.nn.Sequential(*layers)
-
-    def expected_sparsity(self) -> float:
-        data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
-        return sum(data) / len(data)
-
-    def realized_sparsity(self) -> float:
-        data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, MaskedLayer)]
-        return sum(data) / len(data)
-
-    def active_weights(self) -> int:
-        return sum([layer.active_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
-
-    def total_weights(self) -> int:
-        return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
-
-    def forward(self, x):
-        return self.model(x)
-
-class SparseCNN(torch.nn.Module):
-    def __init__(self, in_channels: int, num_classes: int, num_blocks: int, hidden_channels: int, sparsity: float, act: str, layernorm: bool):
-        super().__init__()
-
-        act_fn = torch.nn.ReLU if act == "relu" else torch.nn.Tanh
-        norm_fn = lambda c: torch.nn.BatchNorm2d(c) if layernorm else torch.nn.Identity()
-
-        layers = []
-
-        # initial convolutional block
-        layers.append(MaskedLayer(torch.nn.Conv2d(in_channels, hidden_channels, kernel_size=3, padding=1), sparsity))
-        layers.append(norm_fn(hidden_channels))
-        layers.append(act_fn())
-        layers.append(torch.nn.MaxPool2d(2))
-
-        # hidden convolutional blocks
-        for _ in range(num_blocks - 1):
-            layers.append(MaskedLayer(torch.nn.Conv2d(hidden_channels, hidden_channels, kernel_size=3, padding=1), sparsity))
-            layers.append(norm_fn(hidden_channels))
-            layers.append(act_fn())
-            layers.append(torch.nn.MaxPool2d(2))
-
-        # fully connected layer before output
-        layers.append(torch.nn.AdaptiveAvgPool2d(1))
-        layers.append(torch.nn.Flatten())
-        layers.append(MaskedLayer(torch.nn.Linear(hidden_channels, hidden_channels), sparsity))
-        layers.append(act_fn())
-        layers.append(MaskedLayer(torch.nn.Linear(hidden_channels, num_classes), sparsity))
 
         self.model = torch.nn.Sequential(*layers)
 
