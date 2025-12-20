@@ -49,13 +49,14 @@ class MaskedLayer(torch.nn.Module):
             return torch.nn.functional.conv2d(x, masked_weight, self.layer.bias, stride=self.layer.stride, padding=self.layer.padding, dilation=self.layer.dilation, groups=self.layer.groups)
         raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
-class DormantNeuronHelper(torch.nn.Module):
+class ActivationFunctionWrapper(torch.nn.Module):
 
-    def __init__(self):
+    def __init__(self, activation: torch.nn.Module):
         super().__init__()
+        self.activation = activation
 
     def forward(self, x):
-        return x
+        return self.activation(x)
 
     def dormancy_score(self, x, tau: float = 0.1) -> float:
         if len(x.shape) == 2:
@@ -78,15 +79,13 @@ class SparseANN(torch.nn.Module):
         # input layer
         layers.append(MaskedLayer(torch.nn.Linear(in_features, hidden_dim, bias=False), sparsity))
         layers.append(norm(hidden_dim))
-        layers.append(act_f())
-        layers.append(DormantNeuronHelper())
+        layers.append(ActivationFunctionWrapper(act_f()))
 
         # hidden layers
         for layer_index in range(num_hidden_layers):
             layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, hidden_dim, bias=False), sparsity))
             layers.append(norm(hidden_dim))
-            layers.append(act_f())
-            layers.append(DormantNeuronHelper())
+            layers.append(ActivationFunctionWrapper(act_f()))
 
         # output layer
         layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, num_classes), sparsity))
@@ -112,7 +111,7 @@ class SparseANN(torch.nn.Module):
 
         for layer in self.model:
             x = layer(x)
-            if isinstance(layer, mask.network.DormantNeuronHelper):
+            if isinstance(layer, mask.network.ActivationFunctionWrapper):
                 scores.append(layer.dormancy_score(x, 0.1))
 
         return x, numpy.mean(scores)
@@ -133,15 +132,13 @@ class DenseANNFromSparseANN(torch.nn.Module):
         # input layer
         layers.append(MaskedLayer(torch.nn.Linear(in_features, neuron_count, bias=False), 0.0))
         layers.append(norm(neuron_count))
-        layers.append(act_f())
-        layers.append(DormantNeuronHelper())
+        layers.append(ActivationFunctionWrapper(act_f()))
 
         # hidden layers
         for _ in range(network_depth - 2):
             layers.append(MaskedLayer(torch.nn.Linear(neuron_count, neuron_count, bias=False), 0.0))
             layers.append(norm(neuron_count))
-            layers.append(act_f())
-            layers.append(DormantNeuronHelper())
+            layers.append(ActivationFunctionWrapper(act_f()))
 
         # output layer
         layers.append(MaskedLayer(torch.nn.Linear(neuron_count, num_classes), 0.0))
@@ -167,7 +164,7 @@ class DenseANNFromSparseANN(torch.nn.Module):
 
         for layer in self.model:
             x = layer(x)
-            if isinstance(layer, mask.network.DormantNeuronHelper):
+            if isinstance(layer, mask.network.ActivationFunctionWrapper):
                 scores.append(layer.dormancy_score(x, 0.1))
 
         return x, numpy.mean(scores)
