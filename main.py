@@ -43,7 +43,7 @@ def evaluate(model: torch.nn.Module, testloader: DataLoader, device: torch.devic
     with torch.no_grad():
         for inputs, targets in testloader:
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
+            outputs, _ = model(inputs)
             _, preds = outputs.max(1)
             correct += preds.eq(targets).sum().item()
             total += targets.size(0)
@@ -107,6 +107,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                     child.mean_loss = 0.0
                     child.variance_loss = 0.0
+                    child.neuron_dormancy = 0.0
 
                     child.train()
                     child.optimizer = optimizer_factory(child)
@@ -117,12 +118,13 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
             # train population
             for child in children:
-                outputs = child(inputs)
+                outputs, score = child(inputs)
                 loss = criterion(outputs, targets)
 
                 with torch.no_grad():
                     child.mean_loss += loss.mean().item()
                     child.variance_loss += loss.var().item()
+                    child.neuron_dormancy += score
                     child.seen_batches += 1
                     total_batches += 1
 
@@ -146,8 +148,10 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             "learning_rate": children[0].optimizer.param_groups[0]["lr"],
             "mean_loss": children[0].mean_loss / children[0].seen_batches,
             "variance_loss": children[0].variance_loss / children[0].seen_batches,
+            "neuron_dormancy": children[0].neuron_dormancy / children[0].seen_batches,
             "p_mean_loss": numpy.mean([child.mean_loss / child.seen_batches for child in children]),
             "p_variance_loss": numpy.mean([child.variance_loss / child.seen_batches for child in children]),
+            "p_neuron_dormancy": numpy.mean([child.neuron_dormancy / child.seen_batches for child in children]),
             "test_acc": test_acc,
             "pruned_fraction": pruned_fraction,
             "expected_sparsity": expected_sparsity,

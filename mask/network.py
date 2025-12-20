@@ -1,5 +1,8 @@
+from typing import Tuple
+
 import torch
 import mask.utilities
+import numpy
 
 class MaskedWeight(torch.autograd.Function):
 
@@ -46,6 +49,23 @@ class MaskedLayer(torch.nn.Module):
             return torch.nn.functional.conv2d(x, masked_weight, self.layer.bias, stride=self.layer.stride, padding=self.layer.padding, dilation=self.layer.dilation, groups=self.layer.groups)
         raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
+class DormantNeuronHelper(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return x
+
+    def dormancy_score(self, x, tau: float = 0.1) -> float:
+        if len(x.shape) == 2:
+            expectation = x.mean(dim=0)
+            expectation = expectation / ((1.0 / expectation.shape[0]) * expectation.sum())
+            score = (expectation <= tau).int().sum() / expectation.shape[0]
+            return score.item()
+        else:
+            raise RuntimeError("unsupported shape for the input!")
+
 class SparseANN(torch.nn.Module):
     def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
         super().__init__()
@@ -59,12 +79,14 @@ class SparseANN(torch.nn.Module):
         layers.append(MaskedLayer(torch.nn.Linear(in_features, hidden_dim, bias=False), sparsity))
         layers.append(norm(hidden_dim))
         layers.append(act_f())
+        layers.append(DormantNeuronHelper())
 
         # hidden layers
         for layer_index in range(num_hidden_layers):
             layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, hidden_dim, bias=False), sparsity))
             layers.append(norm(hidden_dim))
             layers.append(act_f())
+            layers.append(DormantNeuronHelper())
 
         # output layer
         layers.append(MaskedLayer(torch.nn.Linear(hidden_dim, num_classes), sparsity))
@@ -85,8 +107,15 @@ class SparseANN(torch.nn.Module):
     def total_weights(self) -> int:
         return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, x) -> Tuple[torch.Tensor, float]:
+        scores = []
+
+        for layer in self.model:
+            x = layer(x)
+            if isinstance(layer, mask.network.DormantNeuronHelper):
+                scores.append(layer.dormancy_score(x, 0.1))
+
+        return x, numpy.mean(scores)
 
 class DenseANNFromSparseANN(torch.nn.Module):
     def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
@@ -105,12 +134,14 @@ class DenseANNFromSparseANN(torch.nn.Module):
         layers.append(MaskedLayer(torch.nn.Linear(in_features, neuron_count, bias=False), 0.0))
         layers.append(norm(neuron_count))
         layers.append(act_f())
+        layers.append(DormantNeuronHelper())
 
         # hidden layers
         for _ in range(network_depth - 2):
             layers.append(MaskedLayer(torch.nn.Linear(neuron_count, neuron_count, bias=False), 0.0))
             layers.append(norm(neuron_count))
             layers.append(act_f())
+            layers.append(DormantNeuronHelper())
 
         # output layer
         layers.append(MaskedLayer(torch.nn.Linear(neuron_count, num_classes), 0.0))
@@ -131,5 +162,12 @@ class DenseANNFromSparseANN(torch.nn.Module):
     def total_weights(self) -> int:
         return sum([layer.total_weights() for layer in self.model if isinstance(layer, MaskedLayer)])
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, x) -> Tuple[torch.Tensor, float]:
+        scores = []
+
+        for layer in self.model:
+            x = layer(x)
+            if isinstance(layer, mask.network.DormantNeuronHelper):
+                scores.append(layer.dormancy_score(x, 0.1))
+
+        return x, numpy.mean(scores)
