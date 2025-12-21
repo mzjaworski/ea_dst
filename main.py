@@ -80,7 +80,13 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
     fitness_function = lambda c: numpy.mean(c.mean_loss)
     criterion = criterion_factory()
+
+    input_shape = next(iter(train_loader))[0].shape[1:]
     total_batches = 0
+
+    print(src.utilities.estimate_amortized_flops(model_factory().to(device), warmup_strategy, input_shape, minibatch_budget))
+    exit(0)
+
 
     children = []
     for current_epoch in range(1, epochs + 1):
