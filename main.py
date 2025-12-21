@@ -36,18 +36,30 @@ def update_mask(model: torch.nn.Module, warmup_strategy: mask.warmup.Warmup, pru
 
     return model
 
-def evaluate(model: torch.nn.Module, testloader: DataLoader, device: torch.device) -> float:
+def top_k_accuracy(model: torch.nn.Module, testloader: DataLoader, device: torch.device, top_k: list[int]) -> dict[str, float]:
     model.eval()
-    correct = 0
+    max_k = max(top_k)
+
+    correct = {k: 0 for k in top_k}
     total = 0
+
     with torch.no_grad():
         for inputs, targets in testloader:
-            inputs, targets = inputs.to(device), targets.to(device)
+            inputs = inputs.to(device)
+            targets = targets.to(device)
+
             outputs, _ = model(inputs)
-            _, preds = outputs.max(1)
-            correct += preds.eq(targets).sum().item()
+            _, preds = outputs.topk(max_k, dim=1)
+            preds = preds.t()
+
+            matches = preds.eq(targets.view(1, -1))
+
+            for k in top_k:
+                correct[k] += matches[:k].any(dim=0).sum().item()
+
             total += targets.size(0)
-    return 100 * correct / total
+
+    return {f"accuracy-top{k}": 100.0 * correct[k] / total for k in top_k}
 
 def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     data_count = len(candidates)
@@ -67,6 +79,7 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                 warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
+    fitness_function = lambda c: c.quantile_loss / c.seen_batches
     criterion = criterion_factory()
     total_batches = 0
 
@@ -88,8 +101,8 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                 # pick best model
                 if len(children):
-                    children.sort(key=lambda c: c.mean_loss / c.seen_batches)
-                    # print([child.mean_loss / child.seen_batches for child in children])
+                    children.sort(key=fitness_function)
+                    print([fitness_function(child) for child in children])
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
                     children = []
                 else:
@@ -105,6 +118,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     child.index = child_index
                     child.seen_batches = 0.0
 
+                    child.quantile_loss = 0.0
                     child.mean_loss = 0.0
                     child.variance_loss = 0.0
                     child.neuron_dormancy = 0.0
@@ -122,6 +136,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 loss = criterion(outputs, targets)
 
                 with torch.no_grad():
+                    child.quantile_loss += loss.quantile(q=0.75).item()
                     child.mean_loss += loss.mean().item()
                     child.variance_loss += loss.var().item()
                     child.neuron_dormancy += score
@@ -132,33 +147,43 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 loss.mean().backward()
                 child.optimizer.step()
 
-        children.sort(key=lambda c: c.mean_loss / c.seen_batches)
+        # sort before logging
+        children.sort(key=fitness_function)
 
-        # log stats
-        test_acc = evaluate(children[0], test_loader, device)
-        expected_sparsity = children[0].expected_sparsity()
-        realized_sparsity = children[0].realized_sparsity()
-        active_weights = children[0].active_weights()
-        total_weights = children[0].total_weights()
-
-        settings.logger.log({
+        # create log entry
+        log_entry = {
+            # global info
             "epoch": current_epoch,
-            "batches": total_batches,
-            "survivor": children[0].index,
-            "learning_rate": children[0].optimizer.param_groups[0]["lr"],
+            "total_batches": total_batches,
+            "current_best": children[0].index,
+
+            # best member statistics
+            "quantile_loss": children[0].quantile_loss / children[0].seen_batches,
             "mean_loss": children[0].mean_loss / children[0].seen_batches,
             "variance_loss": children[0].variance_loss / children[0].seen_batches,
             "neuron_dormancy": children[0].neuron_dormancy / children[0].seen_batches,
+
+            # population statistics
+            "p_quantile_loss": numpy.mean([child.quantile_loss / child.seen_batches for child in children]),
             "p_mean_loss": numpy.mean([child.mean_loss / child.seen_batches for child in children]),
             "p_variance_loss": numpy.mean([child.variance_loss / child.seen_batches for child in children]),
             "p_neuron_dormancy": numpy.mean([child.neuron_dormancy / child.seen_batches for child in children]),
-            "test_acc": test_acc,
+
+            # miscellaneous
+            "expected_sparsity": children[0].expected_sparsity(),
+            "realized_sparsity": children[0].realized_sparsity(),
+            "active_weights": children[0].active_weights(),
+            "total_weights": children[0].total_weights(),
+            "learning_rate": children[0].optimizer.param_groups[0]["lr"],
             "pruned_fraction": pruned_fraction,
-            "expected_sparsity": expected_sparsity,
-            "realized_sparsity": realized_sparsity,
-            "active_weights": active_weights,
-            "total_weights": total_weights
-        })
+        }
+
+        # get accuracy at top-k of the best model under current fitness_function
+        for (level, value) in top_k_accuracy(children[0], test_loader, device, [1, 3, 5]).items():
+            log_entry[level] = value
+
+        # store log entry
+        settings.logger.log(log_entry)
 
     return children[0]
 

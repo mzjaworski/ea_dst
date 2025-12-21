@@ -15,7 +15,7 @@ class ILogger(ABC):
         message = ""
 
         for key, value in data.items():
-            message += f" [{key}::{value}]"
+            message += f"[{key}::{value}] "
 
         return message
 
