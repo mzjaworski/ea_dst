@@ -1,27 +1,27 @@
 from abc import ABC, abstractmethod
 import torch
 
-import mask.utilities
-import mask.network
-import mask.weight
+import src.utilities
+import src.network.detail
+import src.rules.weight
 
 class Regrowth(ABC):
 
     @abstractmethod
-    def apply(self, pruned_count: int, layer: mask.network.MaskedLayer) -> mask.network.MaskedLayer: # regrown_layer
+    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer: # regrown_layer
         pass
 
 class NullRegrowth(Regrowth):
 
-    def apply(self, pruned_count: int, layer: mask.network.MaskedLayer) -> mask.network.MaskedLayer:
+    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
         return layer
 
 class UniformRegrowth(Regrowth):
 
     def __init__(self, weight_reinitialization: str = "xavier_uniform"):
-        self.reinitialization = mask.weight.Reinitialization.lookup(weight_reinitialization)
+        self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
 
-    def apply(self, pruned_count: int, layer: mask.network.MaskedLayer) -> mask.network.MaskedLayer:
+    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
         mask = layer.mask.data
 
         flat_mask = mask.view(-1)
@@ -47,9 +47,9 @@ class GradientRegrowth(Regrowth):
 
     def __init__(self, decay_rate: float, weight_reinitialization: str = "zero"):
         self.decay_rate = decay_rate
-        self.reinitialization = mask.weight.Reinitialization.lookup(weight_reinitialization)
+        self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
 
-    def apply(self, pruned_count: int, layer: mask.network.MaskedLayer) -> mask.network.MaskedLayer:
+    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
         weight = layer.layer.weight
         original_mask = layer.mask.data
 
@@ -74,7 +74,7 @@ class GradientRegrowth(Regrowth):
         sorted_indices = inactive_idx[order]
 
         # apply soft_top_k to sorted scores
-        sel_mask = mask.utilities.soft_top_k(sorted_scores, select=pruned_count, decay_rate=self.decay_rate)
+        sel_mask = src.utilities.soft_top_k(sorted_scores, select=pruned_count, decay_rate=self.decay_rate)
         grow = sorted_indices[sel_mask]
 
         # update mask

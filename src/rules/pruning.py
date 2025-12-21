@@ -2,26 +2,26 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 import torch
 
-import mask.utilities
-import mask.network
-import mask.decay
+import src.utilities
+import src.network.detail
+import src.rules.decay
 
 class Pruning(ABC):
 
     @abstractmethod
-    def apply(self, layer: mask.network.MaskedLayer) -> Tuple[int, mask.network.MaskedLayer]: # (pruned_count, pruned_layer)
+    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]: # (pruned_count, pruned_layer)
         pass
 
     @abstractmethod
-    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
         pass
 
 class NullPruning(Pruning):
 
-    def apply(self, layer: mask.network.MaskedLayer) -> Tuple[int, mask.network.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
         return 0, layer
 
-    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
         return 0.0
 
 class MagnitudePruning(Pruning):
@@ -33,7 +33,7 @@ class MagnitudePruning(Pruning):
         self.pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
 
-    def apply(self, layer: mask.network.MaskedLayer) -> Tuple[int, mask.network.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
         weight = layer.layer.weight.data
         original_mask = layer.mask.data
 
@@ -52,7 +52,7 @@ class MagnitudePruning(Pruning):
         # select weights to remove
         mags = flat_weight[active_neurons].abs()
         magnitudes, order = torch.sort(mags, descending=False)
-        sel_mask = mask.utilities.soft_top_k(magnitudes, select=pruned_count, decay_rate=self.decay_rate)
+        sel_mask = src.utilities.soft_top_k(magnitudes, select=pruned_count, decay_rate=self.decay_rate)
 
         # retrieve their indices
         sorted_idx = active_neurons[order]
@@ -65,7 +65,7 @@ class MagnitudePruning(Pruning):
 
         return num_pruned, layer
 
-    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
         self.pruned_fraction = strategy.decay(self.pruned_fraction)
         return self.pruned_fraction
 
@@ -77,7 +77,7 @@ class UniformPruning(Pruning):
 
         self.pruned_fraction = pruned_fraction
 
-    def apply(self, layer: mask.network.MaskedLayer) -> Tuple[int, mask.network.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
         original_mask = layer.mask.data
         flat_mask = original_mask.view(-1)
 
@@ -102,7 +102,7 @@ class UniformPruning(Pruning):
 
         return num_pruned, layer
 
-    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
         self.pruned_fraction = strategy.decay(self.pruned_fraction)
         return self.pruned_fraction
 
@@ -115,7 +115,7 @@ class RSensitivityPruning(Pruning):
         self.pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
 
-    def apply(self, layer: mask.network.MaskedLayer) -> Tuple[int, mask.network.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
         weight = layer.layer.weight
         original_mask = layer.mask.data
 
@@ -144,7 +144,7 @@ class RSensitivityPruning(Pruning):
 
         # select weights to remove
         sorted_sensitivity, order = torch.sort(sensitivity, descending=False)
-        sel_mask = mask.utilities.soft_top_k(sorted_sensitivity, select=pruned_count, decay_rate=self.decay_rate)
+        sel_mask = src.utilities.soft_top_k(sorted_sensitivity, select=pruned_count, decay_rate=self.decay_rate)
 
         # retrieve their indices
         sorted_indices = active_neurons[order]
@@ -157,6 +157,6 @@ class RSensitivityPruning(Pruning):
 
         return num_pruned, layer
 
-    def decay_pruned_fraction(self, strategy: mask.decay.DecayStrategy = mask.decay.NullDecay()) -> float:
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
         self.pruned_fraction = strategy.decay(self.pruned_fraction)
         return self.pruned_fraction

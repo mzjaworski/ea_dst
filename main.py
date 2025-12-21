@@ -1,17 +1,16 @@
 import json
 
 from torch.utils.data import DataLoader
-from itertools import cycle
 from typing import List
 import secrets
 import torch
 import numpy
 
-import mask.network
-import mask.warmup
-import mask.regrowth
-import mask.pruning
-import mask.decay
+import src.network.detail
+import src.rules.warmup
+import src.rules.regrowth
+import src.rules.pruning
+import src.rules.decay
 
 import argparse
 import settings
@@ -19,13 +18,13 @@ import utilities
 import random
 import sys
 
-def update_mask(model: torch.nn.Module, warmup_strategy: mask.warmup.Warmup, prunning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth) -> torch.nn.Module:
+def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, prunning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
 
     # iterate over all layers
     for layer in model.model:
         # we are interested only in custom MaskedLayers
-        if not isinstance(layer, mask.network.MaskedLayer):
+        if not isinstance(layer, src.network.detail.MaskedLayer):
             continue
 
         # apply removal/regrowth only for layers that actually require it
@@ -77,9 +76,9 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     return [candidates[i] for i in selected_indices]
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
-                warmup_strategy: mask.warmup.Warmup, pruning_strategy: mask.pruning.Pruning, regrowth_strategy: mask.regrowth.Regrowth, decay_strategy: mask.decay.DecayStrategy,
+                warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
-    fitness_function = lambda c: c.quantile_loss / c.seen_batches
+    fitness_function = lambda c: numpy.mean(c.mean_loss)
     criterion = criterion_factory()
     total_batches = 0
 
@@ -116,12 +115,10 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
 
                     child.index = child_index
-                    child.seen_batches = 0.0
-
-                    child.quantile_loss = 0.0
-                    child.mean_loss = 0.0
-                    child.variance_loss = 0.0
-                    child.neuron_dormancy = 0.0
+                    child.quantile_loss = []
+                    child.mean_loss = []
+                    child.variance_loss = []
+                    child.neuron_dormancy = []
 
                     child.train()
                     child.optimizer = optimizer_factory(child)
@@ -136,11 +133,10 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 loss = criterion(outputs, targets)
 
                 with torch.no_grad():
-                    child.quantile_loss += loss.quantile(q=0.75).item()
-                    child.mean_loss += loss.mean().item()
-                    child.variance_loss += loss.var().item()
-                    child.neuron_dormancy += score
-                    child.seen_batches += 1
+                    child.quantile_loss.append(loss.quantile(q=0.5).item())
+                    child.mean_loss.append(loss.mean().item())
+                    child.variance_loss.append(loss.var().item())
+                    child.neuron_dormancy.append(score)
                     total_batches += 1
 
                 child.optimizer.zero_grad()
@@ -158,16 +154,16 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             "current_best": children[0].index,
 
             # best member statistics
-            "quantile_loss": children[0].quantile_loss / children[0].seen_batches,
-            "mean_loss": children[0].mean_loss / children[0].seen_batches,
-            "variance_loss": children[0].variance_loss / children[0].seen_batches,
-            "neuron_dormancy": children[0].neuron_dormancy / children[0].seen_batches,
+            "quantile_loss": numpy.mean(children[0].quantile_loss),
+            "mean_loss": numpy.mean(children[0].mean_loss),
+            "variance_loss": numpy.mean(children[0].variance_loss),
+            "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
 
             # population statistics
-            "p_quantile_loss": numpy.mean([child.quantile_loss / child.seen_batches for child in children]),
-            "p_mean_loss": numpy.mean([child.mean_loss / child.seen_batches for child in children]),
-            "p_variance_loss": numpy.mean([child.variance_loss / child.seen_batches for child in children]),
-            "p_neuron_dormancy": numpy.mean([child.neuron_dormancy / child.seen_batches for child in children]),
+            "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
+            "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
+            "p_variance_loss": numpy.mean([numpy.mean(child.variance_loss) for child in children]),
+            "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
 
             # miscellaneous
             "expected_sparsity": children[0].expected_sparsity(),
