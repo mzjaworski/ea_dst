@@ -39,7 +39,9 @@ def estimate_neuron_count(features: int, classes: int, network_depth: int, param
 
     return neurons
 
-def estimate_amortized_flops(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, input_shape: torch.Size, minibatch_budget: int) -> float:
+def estimate_amortized_flops(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, data_loader: torch.utils.data.DataLoader, minibatch_budget: int) -> float:
+    input_shape = next(iter(data_loader))[0].shape[1:]
+
     dense_flop_estimate = 0
     sparse_flop_estimate = 0
 

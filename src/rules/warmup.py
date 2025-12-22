@@ -50,4 +50,4 @@ class GradientWarmup(Warmup): # used eg for gradient regrowth
     def amortized_flops(self, dense_flop_estimate: float, sparse_flop_estimate: float, minibatch_budget: int) -> float:
         warmup_samples = self.minibatch_budget * self.dataset.batch_size
         train_samples = minibatch_budget * self.dataset.batch_size
-        return ((3.0 * sparse_flop_estimate * train_samples) + (2.0 * sparse_flop_estimate + dense_flop_estimate) * warmup_samples) / (train_samples + warmup_samples) # follows Rigging the Lottery: Making All Tickets Winners logic
+        return ((3.0 * sparse_flop_estimate * train_samples) + (2.0 * sparse_flop_estimate + dense_flop_estimate) * warmup_samples) / (train_samples + warmup_samples) # follows (adjusted) Rigging the Lottery: Making All Tickets Winners logic

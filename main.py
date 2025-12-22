@@ -5,6 +5,7 @@ from typing import List
 import secrets
 import torch
 import numpy
+import time
 
 import src.network.detail
 import src.rules.warmup
@@ -81,12 +82,9 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
     fitness_function = lambda c: numpy.mean(c.mean_loss)
     criterion = criterion_factory()
 
-    input_shape = next(iter(train_loader))[0].shape[1:]
+    amortized_flops = 0.0
     total_batches = 0
-
-    print(src.utilities.estimate_amortized_flops(model_factory().to(device), warmup_strategy, input_shape, minibatch_budget))
-    exit(0)
-
+    total_time = 0
 
     children = []
     for current_epoch in range(1, epochs + 1):
@@ -97,6 +95,10 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             for child in children:
                 child.lr_decay.step()
 
+        # log epoch start time
+        start = time.perf_counter()
+
+        # train for one epoch
         for (inputs, targets) in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
 
@@ -109,6 +111,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     children.sort(key=fitness_function)
                     print([fitness_function(child) for child in children])
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
+                    amortized_flops += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
                     children = []
                 else:
                     best_model = model_factory().to(device)
@@ -120,13 +123,20 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     child.load_state_dict(best_model.state_dict())
                     child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
 
+                    # fields related to profiling / state tracking
                     child.index = child_index
                     child.quantile_loss = []
                     child.mean_loss = []
                     child.variance_loss = []
                     child.neuron_dormancy = []
 
+                    # fields required to estimate (amortized) FLOP cost of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
+                    child.amortized_sample_cost = src.utilities.estimate_amortized_flops(child, warmup_strategy, train_loader, minibatch_budget)
+                    child.seen_batches = 0
+
                     child.train()
+
+                    # fields related to optimization state
                     child.optimizer = optimizer_factory(child)
                     child.optimizer.load_state_dict(best_model.optimizer.state_dict())
                     child.lr_decay = lr_decay_factory(child.optimizer)
@@ -143,11 +153,16 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     child.mean_loss.append(loss.mean().item())
                     child.variance_loss.append(loss.var().item())
                     child.neuron_dormancy.append(score)
+                    child.seen_batches += 1
                     total_batches += 1
 
                 child.optimizer.zero_grad()
                 loss.mean().backward()
                 child.optimizer.step()
+
+        # log epoch end time
+        end = time.perf_counter()
+        total_time += end - start
 
         # sort before logging
         children.sort(key=fitness_function)
@@ -156,10 +171,13 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         log_entry = {
             # global info
             "epoch": current_epoch,
+            "total_time": total_time,
+            "epoch_time": end - start,
             "total_batches": total_batches,
-            "current_best": children[0].index,
+            "amortized_flops": amortized_flops + numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children]),
 
             # best member statistics
+            "current_best": children[0].index,
             "quantile_loss": numpy.mean(children[0].quantile_loss),
             "mean_loss": numpy.mean(children[0].mean_loss),
             "variance_loss": numpy.mean(children[0].variance_loss),
@@ -230,13 +248,7 @@ if __name__ == "__main__":
     warmup = utilities.resolve_class(settings.warmup["type"])(dataset=train_loader, **settings.warmup["kwargs"])
     pruning = utilities.resolve_class(settings.pruning["type"])(**settings.pruning["kwargs"])
     regrowth = utilities.resolve_class(settings.regrowth["type"])(**settings.regrowth["kwargs"])
-
-    if not isinstance(settings.decay, list):
-        decay = utilities.resolve_class(settings.decay["type"])(**settings.decay["kwargs"])
-    else:
-        decay = []
-        for entry in settings.decay:
-            decay.append(utilities.resolve_class(entry["type"])(**entry["kwargs"]))
+    decay = utilities.resolve_class(settings.decay["type"])(**settings.decay["kwargs"])
 
     # instantiate experiment handle and call it
     mode = globals()[settings.mode["type"]](model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, decay_strategy=decay, **settings.mode["kwargs"])
