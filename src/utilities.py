@@ -1,3 +1,4 @@
+import src.network.detail
 import torch
 
 def soft_top_k(data: torch.Tensor, select: int = 1, decay_rate: float = 1.5) -> torch.BoolTensor:
@@ -37,3 +38,21 @@ def estimate_neuron_count(features: int, classes: int, network_depth: int, param
         neurons += 1
 
     return neurons
+
+def estimate_amortized_flops(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, data_loader: torch.utils.data.DataLoader, minibatch_budget: int) -> float:
+    input_shape = next(iter(data_loader))[0].shape[1:]
+
+    dense_flop_estimate = 0
+    sparse_flop_estimate = 0
+
+    for current_layer in model.model:
+        # we are interested only in custom MaskedLayers
+        if not isinstance(current_layer, src.network.detail.MaskedLayer):
+            continue
+
+        # update estimates for fully sparse and dense networks
+        _1, _2 = current_layer.estimate_flops(input_shape)
+        dense_flop_estimate += _1
+        sparse_flop_estimate += _2
+
+    return warmup_strategy.amortized_flops(dense_flop_estimate, sparse_flop_estimate, minibatch_budget)

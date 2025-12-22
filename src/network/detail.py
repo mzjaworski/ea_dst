@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 
 class ActivationFunctionWrapper(torch.nn.Module):
@@ -6,10 +7,10 @@ class ActivationFunctionWrapper(torch.nn.Module):
         super().__init__()
         self.activation = activation
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.activation(x)
 
-    def dormancy_score(self, x, tau: float = 0.1) -> float: # The Dormant Neuron Phenomenon in Deep Reinforcement Learning
+    def dormancy_score(self, x: torch.Tensor, tau: float = 0.1) -> float: # The Dormant Neuron Phenomenon in Deep Reinforcement Learning
         if len(x.shape) == 2:
             expectation = x.mean(dim=0)
             expectation = expectation / ((1.0 / expectation.shape[0]) * expectation.sum())
@@ -21,11 +22,11 @@ class ActivationFunctionWrapper(torch.nn.Module):
 class MaskedWeight(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, weight, mask):
+    def forward(ctx, weight: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         return weight * mask
 
     @staticmethod
-    def backward(ctx, gradient):
+    def backward(ctx, gradient: torch.Tensor) -> Tuple[torch.Tensor, None]:
         return gradient, None
 
 class MaskedLayer(torch.nn.Module):
@@ -43,6 +44,14 @@ class MaskedLayer(torch.nn.Module):
         mask.view(-1)[torch.randperm(mask.numel())[:k]] = 1
         self.mask = torch.nn.Parameter(mask, requires_grad=False)
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        masked_weight = MaskedWeight.apply(self.layer.weight, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
+        if isinstance(self.layer, torch.nn.Linear): # there are much better ways to do this but it works for now
+            return torch.nn.functional.linear(x, masked_weight, self.layer.bias)
+        elif isinstance(self.layer, torch.nn.Conv2d):
+            return torch.nn.functional.conv2d(x, masked_weight, self.layer.bias, stride=self.layer.stride, padding=self.layer.padding, dilation=self.layer.dilation, groups=self.layer.groups)
+        raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
+
     def expected_sparsity(self) -> float:
         return self.sparsity
 
@@ -55,10 +64,30 @@ class MaskedLayer(torch.nn.Module):
     def total_weights(self) -> int:
         return self.mask.numel()
 
-    def forward(self, x):
-        masked_weight = MaskedWeight.apply(self.layer.weight, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
-        if isinstance(self.layer, torch.nn.Linear): # there are much better ways to do this but it works for now
-            return torch.nn.functional.linear(x, masked_weight, self.layer.bias)
-        elif isinstance(self.layer, torch.nn.Conv2d):
-            return torch.nn.functional.conv2d(x, masked_weight, self.layer.bias, stride=self.layer.stride, padding=self.layer.padding, dilation=self.layer.dilation, groups=self.layer.groups)
-        raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
+    def estimate_flops(self, input_shape) -> Tuple[int, int]:
+        def flop_estimate(non_zero: int):
+            # now estimate effective flop count based on type of layer
+            if isinstance(self.layer, torch.nn.Linear):
+                weight_flops = 2.0 * non_zero
+                bias_flops = self.layer.out_features if self.layer.bias is not None else 0
+                return weight_flops + bias_flops
+            elif isinstance(self.layer, torch.nn.Conv2d): # TODO this branch has to be verified!
+                H_in, W_in, C_in = input_shape
+
+                # verify that input channels match
+                if C_in != self.layer.in_channels:
+                    raise RuntimeError(f"Input channels {C_in} do not match layer in_channels {self.layer.in_channels}")
+
+                # estimate spatial dimensions of the output
+                H_out = (H_in + 2 * self.layer.padding[0] - self.layer.dilation[0] * (
+                            self.layer.kernel_size[0] - 1) - 1) // self.layer.stride[0] + 1
+                W_out = (W_in + 2 * self.layer.padding[1] - self.layer.dilation[1] * (
+                            self.layer.kernel_size[1] - 1) - 1) // self.layer.stride[1] + 1
+
+                weight_flops = 2 * non_zero * H_out * W_out
+                bias_flops = self.layer.out_channels * H_out * W_out if self.layer.bias is not None else 0
+
+                return weight_flops + bias_flops
+            raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
+
+        return flop_estimate(self.total_weights()), flop_estimate(self.active_weights())
