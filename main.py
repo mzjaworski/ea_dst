@@ -1,6 +1,7 @@
 import json
 
 from torch.utils.data import DataLoader
+from itertools import cycle
 from typing import List
 import secrets
 import torch
@@ -206,6 +207,188 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         settings.logger.log(log_entry)
 
     return children[0]
+
+def transplant_mask(from_model: torch.nn.Module, to_model: torch.nn.Module, weight_reinitialization: str = "zero") -> torch.nn.Module:
+    reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
+
+    from_layers = []
+    to_layers = []
+
+    for m in from_model.modules():
+        if isinstance(m, src.network.detail.MaskedLayer):
+            from_layers.append(m)
+
+    for m in to_model.modules():
+        if isinstance(m, src.network.detail.MaskedLayer):
+            to_layers.append(m)
+
+    assert len(from_layers) == len(to_layers), "MaskedLayer count mismatch"
+
+    for src_layer, tgt_layer in zip(from_layers, to_layers):
+        assert src_layer.mask.shape == tgt_layer.mask.shape, "Mask shape mismatch"
+
+        grow = (src_layer.mask.bool() & (~tgt_layer.mask.bool())).view(-1).nonzero(as_tuple=True)
+        tgt_layer.layer.weight.data = reinitialization(tgt_layer.layer.weight.data, grow)
+
+        tgt_layer.mask.data.copy_(src_layer.mask.data)
+        tgt_layer.mask.requires_grad = False   # freeze transplanted mask
+
+    return to_model
+
+def partial_sort(lst, start=1, end=None, *, key=None, reverse=False):
+    lst[start:end] = sorted(lst[start:end], key=key, reverse=reverse)
+
+def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
+                warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
+                device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
+
+    def initialize_fields(model: torch.nn.Module) -> torch.nn.Module:
+        # fields related to profiling / state tracking
+        model.mean_loss = []
+        model.seen_batches = 0
+
+        # fields related to optimization state
+        model.optimizer = optimizer_factory(model)
+        model.lr_decay = lr_decay_factory(model.optimizer)
+
+        return model
+
+    fitness_function = lambda c: numpy.mean(c.mean_loss)
+    criterion = criterion_factory()
+
+    amortized_flops = 0.0
+    total_batches = 0
+    total_time = 0
+
+    main_network = initialize_fields(model_factory().to(device))
+    children = []
+
+    for current_epoch in range(1, epochs + 1):
+        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
+
+        # log epoch start time
+        start = time.perf_counter()
+
+        # train for one epoch
+        for (inputs, targets) in train_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+
+            # update main network mask
+            if main_network.seen_batches % minibatch_budget == 0:
+                weight_donor = model_factory().to(device)
+                children = []
+
+                # generate new offspring
+                for child_index in range(1, offspring + 1):
+                    clone = model_factory().to(device)
+                    clone.load_state_dict(main_network.state_dict())
+                    clone = update_mask(clone, warmup_strategy, pruning_strategy, regrowth_strategy)
+
+                    child = initialize_fields(model_factory().to(device))
+                    # child.load_state_dict(weight_donor.state_dict())
+                    child.index = child_index
+
+                    if child_index != 1:
+                        child = transplant_mask(clone, child, weight_reinitialization="zero")
+                    else:
+                        child = transplant_mask(main_network, child, weight_reinitialization="zero")
+
+                    child.train()
+
+                    child.optimizer = optimizer_factory(child)
+                    child.optimizer.load_state_dict(main_network.optimizer.state_dict())
+                    child.lr_decay = lr_decay_factory(child.optimizer)
+
+                    children.append(child)
+
+                # train offspring
+                for batch_index, (child_inputs, child_targets) in enumerate(cycle(train_loader)):
+                    child_inputs, child_targets = child_inputs.to(device), child_targets.to(device)
+
+                    if batch_index >= minibatch_budget:
+                        break
+
+                    for child in children:
+                        outputs, score = child(child_inputs)
+                        loss = criterion(outputs, child_targets)
+
+                        with torch.no_grad():
+                            child.mean_loss.append(loss.mean().item())
+                            child.seen_batches += 1
+                            total_batches += 1
+
+                        child.optimizer.zero_grad()
+                        loss.mean().backward()
+                        child.optimizer.step()
+
+                # pick best and transplant mask back to main network
+                children.sort(key=fitness_function)
+                print([(child.index, fitness_function(child)) for child in children])
+                main_network = transplant_mask(soft_top_k(children, select=1, decay_rate=decay_rate)[0], main_network, weight_reinitialization="zero")
+
+            main_network.train()
+
+            # train main network
+            outputs, score = main_network(inputs)
+            loss = criterion(outputs, targets)
+
+            with torch.no_grad():
+                main_network.mean_loss.append(loss.mean().item())
+                main_network.seen_batches += 1
+                total_batches += 1
+
+            main_network.optimizer.zero_grad()
+            loss.mean().backward()
+            main_network.optimizer.step()
+
+        # log epoch end time
+        end = time.perf_counter()
+        total_time += end - start
+
+        # apply learning rate decay to main_network
+        main_network.lr_decay.step()
+
+        # sort before logging
+        partial_sort(children, key=fitness_function)
+
+        # create log entry
+        log_entry = {
+            # global info
+            "epoch": current_epoch,
+            "total_time": total_time,
+            "epoch_time": end - start,
+            "total_batches": total_batches,
+
+            # best member statistics
+            "mean_loss": numpy.mean(main_network.mean_loss),
+
+            # population statistics
+            "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
+
+            # miscellaneous
+            "expected_sparsity": main_network.expected_sparsity(),
+            "realized_sparsity": main_network.realized_sparsity(),
+            "active_weights": main_network.active_weights(),
+            "total_weights": main_network.total_weights(),
+            "learning_rate": main_network.optimizer.param_groups[0]["lr"],
+            "pruned_fraction": pruned_fraction,
+        }
+
+        # get accuracy at top-k of the best model under current fitness_function
+        for (level, value) in top_k_accuracy(main_network, test_loader, device, [1, 3, 5]).items():
+            log_entry[level] = value
+
+        # store log entry
+        settings.logger.log(log_entry)
+
+    return children[0]
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
