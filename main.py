@@ -77,10 +77,33 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     selected_indices = numpy.random.choice(data_count, size=select, replace=False, p=probabilities)
     return [candidates[i] for i in selected_indices]
 
+# def normalized_aulc(candidates: List, eps: float = 0.00001) -> List:
+#     loss = numpy.array([c.quantile_loss for c in candidates])
+#     per_batch = numpy.mean(loss, axis=0)
+#
+#     for i, candidate in enumerate(candidates):
+#         candidate.normalized_aulc = loss[i] / (per_batch + eps)
+#
+#     return candidates
+
+def normalized_aulc(candidates: List, alpha: float = 1.03, eps: float = 1e-8) -> List:
+    loss = numpy.array([c.quantile_loss for c in candidates])
+    diff = numpy.abs(numpy.diff(loss, axis=1))
+
+    pop_loss = loss.mean(axis=0)
+    pop_diff = diff.mean(axis=0)
+
+    for i, c in enumerate(candidates):
+        level = loss[i][1:] / (pop_loss[1:] + eps)
+        slope = diff[i] / (pop_diff + eps)
+        c.normalized_aulc = numpy.mean(alpha * level + (1.0 - alpha) * slope)
+
+    return candidates
+
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
-    fitness_function = lambda c: numpy.mean(c.mean_loss)
+    fitness_function = lambda c: numpy.mean(c.normalized_aulc)
     criterion = criterion_factory()
 
     amortized_flops = 0.0
@@ -109,8 +132,17 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                 # pick best model
                 if len(children):
+                    children = normalized_aulc(children)
+
+                    children.sort(key=lambda c: numpy.mean(c.mean_loss))
+                    print([(child.index, (lambda c: numpy.mean(c.mean_loss))(child)) for child in children])
+
+                    children.sort(key=lambda c: numpy.mean(c.quantile_loss))
+                    print([(child.index, (lambda c: numpy.mean(c.quantile_loss))(child)) for child in children])
+
                     children.sort(key=fitness_function)
-                    print([fitness_function(child) for child in children])
+                    print([(child.index, fitness_function(child)) for child in children])
+
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
                     amortized_flops += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
                     children = []
@@ -122,13 +154,14 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 for child_index in range(1, offspring + 1):
                     child = model_factory().to(device)
                     child.load_state_dict(best_model.state_dict())
+
                     child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
 
                     # fields related to profiling / state tracking
                     child.index = child_index
                     child.quantile_loss = []
                     child.mean_loss = []
-                    child.variance_loss = []
+                    child.std_loss = []
                     child.neuron_dormancy = []
 
                     # fields required to estimate (amortized) FLOP cost of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
@@ -152,7 +185,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 with torch.no_grad():
                     child.quantile_loss.append(loss.quantile(q=0.5).item())
                     child.mean_loss.append(loss.mean().item())
-                    child.variance_loss.append(loss.var().item())
+                    child.std_loss.append(loss.std().item())
                     child.neuron_dormancy.append(score)
                     child.seen_batches += 1
                     total_batches += 1
@@ -166,6 +199,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         total_time += end - start
 
         # sort before logging
+        children = normalized_aulc(children)
         children.sort(key=fitness_function)
 
         # create log entry
@@ -181,13 +215,13 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             "current_best": children[0].index,
             "quantile_loss": numpy.mean(children[0].quantile_loss),
             "mean_loss": numpy.mean(children[0].mean_loss),
-            "variance_loss": numpy.mean(children[0].variance_loss),
+            "std_loss": numpy.mean(children[0].std_loss),
             "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
 
             # population statistics
             "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
             "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
-            "p_variance_loss": numpy.mean([numpy.mean(child.variance_loss) for child in children]),
+            "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
             "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
 
             # miscellaneous
@@ -245,6 +279,7 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
     def initialize_fields(model: torch.nn.Module) -> torch.nn.Module:
         # fields related to profiling / state tracking
         model.mean_loss = []
+        model.quantile_loss = []
         model.seen_batches = 0
 
         # fields related to optimization state
@@ -253,7 +288,7 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
 
         return model
 
-    fitness_function = lambda c: numpy.mean(c.mean_loss)
+    fitness_function = lambda c: numpy.mean(c.normalized_aulc)
     criterion = criterion_factory()
 
     amortized_flops = 0.0
@@ -265,6 +300,10 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
 
     for current_epoch in range(1, epochs + 1):
         pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
+
+        # reset fields
+        main_network.quantile_loss = []
+        main_network.mean_loss = []
 
         # log epoch start time
         start = time.perf_counter()
@@ -285,13 +324,15 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
                     clone = update_mask(clone, warmup_strategy, pruning_strategy, regrowth_strategy)
 
                     child = initialize_fields(model_factory().to(device))
-                    # child.load_state_dict(weight_donor.state_dict())
+                    child.load_state_dict(weight_donor.state_dict())
                     child.index = child_index
 
-                    if child_index != 1:
-                        child = transplant_mask(clone, child, weight_reinitialization="zero")
-                    else:
-                        child = transplant_mask(main_network, child, weight_reinitialization="zero")
+                    child = transplant_mask(clone, child, weight_reinitialization="zero")
+
+                    # if child_index != 1:
+                    #     child = transplant_mask(clone, child, weight_reinitialization="zero")
+                    # else:
+                    #     child = transplant_mask(main_network, child, weight_reinitialization="zero")
 
                     child.train()
 
@@ -313,6 +354,7 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
                         loss = criterion(outputs, child_targets)
 
                         with torch.no_grad():
+                            child.quantile_loss.append(loss.quantile(q=0.5).item())
                             child.mean_loss.append(loss.mean().item())
                             child.seen_batches += 1
                             total_batches += 1
@@ -322,6 +364,7 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
                         child.optimizer.step()
 
                 # pick best and transplant mask back to main network
+                children = normalized_aulc(children)
                 children.sort(key=fitness_function)
                 print([(child.index, fitness_function(child)) for child in children])
                 main_network = transplant_mask(soft_top_k(children, select=1, decay_rate=decay_rate)[0], main_network, weight_reinitialization="zero")
@@ -333,6 +376,7 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
             loss = criterion(outputs, targets)
 
             with torch.no_grad():
+                main_network.quantile_loss.append(loss.quantile(q=0.5).item())
                 main_network.mean_loss.append(loss.mean().item())
                 main_network.seen_batches += 1
                 total_batches += 1
@@ -349,7 +393,8 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
         main_network.lr_decay.step()
 
         # sort before logging
-        partial_sort(children, key=fitness_function)
+        children = normalized_aulc(children)
+        children.sort(key=fitness_function)
 
         # create log entry
         log_entry = {
@@ -361,9 +406,11 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
 
             # best member statistics
             "mean_loss": numpy.mean(main_network.mean_loss),
+            "quantile_loss": numpy.mean(main_network.quantile_loss),
 
             # population statistics
             "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
+            "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
 
             # miscellaneous
             "expected_sparsity": main_network.expected_sparsity(),
