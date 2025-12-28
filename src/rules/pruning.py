@@ -13,7 +13,11 @@ class Pruning(ABC):
         pass
 
     @abstractmethod
-    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
+    def pruned_fraction(self) -> float:
+        pass
+
+    @abstractmethod
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
         pass
 
 class NullPruning(Pruning):
@@ -21,8 +25,11 @@ class NullPruning(Pruning):
     def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
         return 0, layer
 
-    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
+    def pruned_fraction(self) -> float:
         return 0.0
+
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
+        pass
 
 class MagnitudePruning(Pruning):
 
@@ -30,7 +37,7 @@ class MagnitudePruning(Pruning):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
             raise ValueError("pruned_fraction must be in [0.0, 1.0]")
 
-        self.pruned_fraction = pruned_fraction
+        self._pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
 
     def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
@@ -47,7 +54,7 @@ class MagnitudePruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        pruned_count = int(self.pruned_fraction * total_active)
+        pruned_count = int(self._pruned_fraction * total_active)
 
         # select weights to remove
         mags = flat_weight[active_neurons].abs()
@@ -65,9 +72,11 @@ class MagnitudePruning(Pruning):
 
         return num_pruned, layer
 
-    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
-        self.pruned_fraction = strategy.decay(self.pruned_fraction)
-        return self.pruned_fraction
+    def pruned_fraction(self) -> float:
+        return self._pruned_fraction
+
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
+        self._pruned_fraction = strategy.decay(self._pruned_fraction)
 
 class UniformPruning(Pruning):
 
@@ -75,7 +84,7 @@ class UniformPruning(Pruning):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
             raise ValueError("pruned_fraction must be in [0.0, 1.0]")
 
-        self.pruned_fraction = pruned_fraction
+        self._pruned_fraction = pruned_fraction
 
     def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
         original_mask = layer.mask.data
@@ -88,7 +97,7 @@ class UniformPruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        num_pruned = int(self.pruned_fraction * total_active)
+        num_pruned = int(self._pruned_fraction * total_active)
 
         if num_pruned == 0:
             return 0, layer
@@ -102,9 +111,11 @@ class UniformPruning(Pruning):
 
         return num_pruned, layer
 
-    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
-        self.pruned_fraction = strategy.decay(self.pruned_fraction)
-        return self.pruned_fraction
+    def pruned_fraction(self) -> float:
+        return self._pruned_fraction
+
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
+        self._pruned_fraction = strategy.decay(self._pruned_fraction)
 
 class RSensitivityPruning(Pruning):
 
@@ -112,7 +123,7 @@ class RSensitivityPruning(Pruning):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
             raise ValueError("pruned_fraction must be in [0.0, 1.0]")
 
-        self.pruned_fraction = pruned_fraction
+        self._pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
 
     def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
@@ -135,7 +146,7 @@ class RSensitivityPruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        pruned_count = int(self.pruned_fraction * total_active)
+        pruned_count = int(self._pruned_fraction * total_active)
 
         # compute sensitivity scores: |w| / |grad|
         abs_weight = flat_weight[active_neurons].abs()
@@ -157,6 +168,8 @@ class RSensitivityPruning(Pruning):
 
         return num_pruned, layer
 
-    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> float:
-        self.pruned_fraction = strategy.decay(self.pruned_fraction)
-        return self.pruned_fraction
+    def pruned_fraction(self) -> float:
+        return self._pruned_fraction
+
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
+        self._pruned_fraction = strategy.decay(self._pruned_fraction)

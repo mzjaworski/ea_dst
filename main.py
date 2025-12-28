@@ -86,19 +86,65 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
 #
 #     return candidates
 
-def normalized_aulc(candidates: List, alpha: float = 1.03, eps: float = 1e-8) -> List:
-    loss = numpy.array([c.quantile_loss for c in candidates])
-    diff = numpy.abs(numpy.diff(loss, axis=1))
+# def normalized_aulc(candidates: List, alpha: float = 1.0, eps: float = 1e-8) -> List:
+#     loss = numpy.array([c.quantile_loss for c in candidates])
+#     diff = numpy.abs(numpy.diff(loss, axis=1))
+#
+#     pop_loss = numpy.mean(loss, axis=0)
+#     pop_diff = numpy.mean(diff, axis=0)
+#
+#     for i, c in enumerate(candidates):
+#         level = loss[i][1:] / (pop_loss[1:] + eps)
+#         slope = diff[i] / (pop_diff + eps)
+#         c.normalized_aulc = numpy.mean(alpha * level + (1.0 - alpha) * slope)
+#
+#     return candidates
 
-    pop_loss = loss.mean(axis=0)
-    pop_diff = diff.mean(axis=0)
+def normalized_aulc(candidates: List, alpha: float = 1.0, split: int = 20, eps: float = 1e-8) -> List:
+    if len(candidates) < 2:
+        for i, c in enumerate(candidates):
+            c.normalized_aulc = 0.0
+        return candidates
+
+    loss = numpy.array([c.mean_loss for c in candidates])  # (N, T)
+    diff = numpy.abs(numpy.diff(loss, axis=1))  # (N, T-1)
+
+    N, T = loss.shape
+    split = min(split, T)
+    part_len = T // split
+
+    scores = numpy.zeros((N, split))
+
+    for s in range(split):
+        start = s * part_len
+        end = (s + 1) * part_len if s < split - 1 else T
+
+        loss_s = loss[:, start:end]
+        diff_s = diff[:, start:end - 1]
+
+        pop_loss = loss_s.mean(axis=0)
+        pop_diff = diff_s.mean(axis=0)
+
+        for i in range(N):
+            level = loss_s[i][1:] / (pop_loss[1:] + eps)
+            slope = diff_s[i] / (pop_diff + eps) if diff_s.shape[1] > 0 else 0.0
+
+            scores[i, s] = numpy.mean(alpha * level + (1.0 - alpha) * slope)
+
+    # rank within each split
+    ranks = numpy.argsort(numpy.argsort(scores, axis=0), axis=0)
+    ranks = ranks / (N - 1 + eps)
+
+    # average rank across splits
+    final_rank = ranks.mean(axis=1)
 
     for i, c in enumerate(candidates):
-        level = loss[i][1:] / (pop_loss[1:] + eps)
-        slope = diff[i] / (pop_diff + eps)
-        c.normalized_aulc = numpy.mean(alpha * level + (1.0 - alpha) * slope)
+        c.normalized_aulc = final_rank[i]
 
     return candidates
+
+
+
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
@@ -106,13 +152,20 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
     fitness_function = lambda c: numpy.mean(c.normalized_aulc)
     criterion = criterion_factory()
 
+    pruned_fraction = pruning_strategy.pruned_fraction()
     amortized_flops = 0.0
     total_batches = 0
     total_time = 0
 
     children = []
     for current_epoch in range(1, epochs + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
+
+        # if current_epoch == 35 or current_epoch == 70:
+        #     pruned_fraction /= 2.0
+
+        pruning_strategy.decay_pruned_fraction(src.rules.decay.ConstantDecay(pruned_fraction).update(0)) # restore fraction
+        pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
+        pruned_fraction = pruning_strategy.pruned_fraction() # store new fraction
 
         # apply learning rate decay to children
         if len(children):
@@ -141,7 +194,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     print([(child.index, (lambda c: numpy.mean(c.quantile_loss))(child)) for child in children])
 
                     children.sort(key=fitness_function)
-                    print([(child.index, fitness_function(child)) for child in children])
+                    print(f"metric : {[(child.index, fitness_function(child)) for child in children]}")
 
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
                     amortized_flops += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
@@ -152,6 +205,8 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
+                    pruning_strategy.decay_pruned_fraction(src.rules.decay.ConstantDecay((pruned_fraction / offspring) * child_index).update(0))
+
                     child = model_factory().to(device)
                     child.load_state_dict(best_model.state_dict())
 
@@ -299,7 +354,8 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
     children = []
 
     for current_epoch in range(1, epochs + 1):
-        pruned_fraction = pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
+        pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
+        pruned_fraction = pruning_strategy.pruned_fraction()
 
         # reset fields
         main_network.quantile_loss = []
