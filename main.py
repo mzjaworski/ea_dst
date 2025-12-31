@@ -86,14 +86,16 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 0.7, eps: floa
 
     # get loss and its change
     loss = numpy.array([c.mean_loss for c in candidates])
-    diff = numpy.abs(numpy.diff(loss, axis=1))
-
-    # align loss with change
-    loss = loss[:, 1:]
+    # diff = numpy.abs(numpy.diff(loss, axis=1))
+    #
+    # # align loss with change
+    # loss = loss[:, 1:]
 
     # compute per candidate averages
-    loss_score = loss.mean(axis=1)
-    diff_score = diff.mean(axis=1)
+    loss_score = numpy.mean(loss, axis=1)
+    # diff_score = numpy.mean(diff, axis=1)
+    diff_score = numpy.array([-numpy.mean(numpy.sum(numpy.array(candidate.gradients) ** 2, axis=1)) / (numpy.sum(numpy.var(numpy.array(candidate.gradients), axis=0)) + 1e-8) for candidate in candidates])
+
 
     # assign ranks
     loss_rank = numpy.argsort(numpy.argsort(loss_score))
@@ -116,6 +118,8 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
     fitness_function = lambda c: c.rank
+    alpha = 0.5
+
     criterion = criterion_factory()
 
     amortized_flops = 0.0
@@ -145,15 +149,15 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                 # pick best model
                 if len(children):
-                    children = rank_models(children, alpha=1.0)
-                    children.sort(key=fitness_function)
-                    print([(child.index, fitness_function(child)) for child in children])
+                    # children = rank_models(children, alpha=1.0)
+                    # children.sort(key=fitness_function)
+                    # print([(child.index, fitness_function(child)) for child in children])
+                    #
+                    # children = rank_models(children, alpha=0.0)
+                    # children.sort(key=fitness_function)
+                    # print([(child.index, fitness_function(child)) for child in children])
 
-                    children = rank_models(children, alpha=0.0)
-                    children.sort(key=fitness_function)
-                    print([(child.index, fitness_function(child)) for child in children])
-
-                    children = rank_models(children, alpha=0.7)
+                    children = rank_models(children, alpha=alpha)
                     children.sort(key=fitness_function)
                     print([(child.index, fitness_function(child)) for child in children])
 
@@ -179,6 +183,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     child.mean_loss = []
                     child.std_loss = []
                     child.neuron_dormancy = []
+                    child.gradients = []
 
                     # fields required to estimate (amortized) FLOP cost of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
                     child.amortized_sample_cost = src.utilities.estimate_amortized_flops(child, warmup_strategy, train_loader, minibatch_budget)
@@ -208,6 +213,16 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                 child.optimizer.zero_grad()
                 loss.mean().backward()
+
+                gradients = []
+                for current_layer in child.model:
+                    if not isinstance(current_layer, src.network.detail.MaskedLayer):
+                        continue
+
+                    if current_layer.layer.weight.grad is not None:
+                        gradients.append(current_layer.layer.weight.grad[current_layer.mask == 1].flatten())
+                child.gradients.append(torch.cat(gradients).cpu().numpy())
+
                 child.optimizer.step()
 
         # log epoch end time
@@ -215,7 +230,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         total_time += end - start
 
         # sort before logging
-        children = rank_models(children)
+        children = rank_models(children, alpha=alpha)
         children.sort(key=fitness_function)
 
         # create log entry
@@ -233,12 +248,16 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             "mean_loss": numpy.mean(children[0].mean_loss),
             "std_loss": numpy.mean(children[0].std_loss),
             "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
+            "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
+            "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
 
             # population statistics
             "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
             "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
             "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
             "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
+            "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
+            "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
 
             # miscellaneous
             "expected_sparsity": children[0].expected_sparsity(),
@@ -258,69 +277,80 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
     return children[0]
 
-def transplant_mask(from_model: torch.nn.Module, to_model: torch.nn.Module, weight_reinitialization: str = "zero") -> torch.nn.Module:
-    reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
+from typing import List, Tuple
+import math
 
-    from_layers = []
-    to_layers = []
+def successive_halving_batches(total_budget: int, num_children: int, keep: float) -> List[int]:
+    S = int(math.floor(math.log(num_children, 1.0 / keep)))
+    weights = [(1.0 / keep) ** s for s in range(S)]
+    Z = sum(weights)
 
-    for m in from_model.modules():
-        if isinstance(m, src.network.detail.MaskedLayer):
-            from_layers.append(m)
+    batches = [int(total_budget * w / Z) for w in weights]
+    batches[-1] += total_budget - sum(batches)  # fix rounding
+    return batches
 
-    for m in to_model.modules():
-        if isinstance(m, src.network.detail.MaskedLayer):
-            to_layers.append(m)
+class SuccessiveHalvingScheduler:
+    def __init__(self, total_budget: int, num_children: int, keep: float, alpha_range: Tuple[float, float] = (1.0, 1.0)):
+        self.total_budget = total_budget
+        self.num_children = num_children
+        self.keep = keep
 
-    assert len(from_layers) == len(to_layers), "MaskedLayer count mismatch"
+        # Compute survivors per stage
+        S = int(math.floor(math.log(num_children, 1.0 / keep)))
+        self.survivors = [max(1, int(round(num_children * (keep ** s)))) for s in range(S)]
 
-    for src_layer, tgt_layer in zip(from_layers, to_layers):
-        assert src_layer.mask.shape == tgt_layer.mask.shape, "Mask shape mismatch"
+        # Compute minibatches per stage using weighted schedule
+        self.batches_per_stage = successive_halving_batches(total_budget, num_children, keep)
 
-        grow = (src_layer.mask.bool() & (~tgt_layer.mask.bool())).view(-1).nonzero(as_tuple=True)
-        tgt_layer.layer.weight.data = reinitialization(tgt_layer.layer.weight.data, grow)
+        self.alpha_range = numpy.linspace(alpha_range[0], alpha_range[1], S)
 
-        tgt_layer.mask.data.copy_(src_layer.mask.data)
-        tgt_layer.mask.requires_grad = False   # freeze transplanted mask
+        self.stage_idx = 0
+        self.consumed_in_stage = 0
 
-    return to_model
+    def __call__(self) -> Tuple[bool, int, float]:
+        """
+        Consume one minibatch. Returns the number of models to keep for current stage.
+        Last call returns 1 to signal iteration end.
+        """
+        if self.stage_idx >= len(self.survivors):
+            return True, 1, self.alpha_range[-1]  # iteration finished
 
-def partial_sort(lst, start=1, end=None, *, key=None, reverse=False):
-    lst[start:end] = sorted(lst[start:end], key=key, reverse=reverse)
+        self.consumed_in_stage += 1
+
+        if self.consumed_in_stage >= self.batches_per_stage[self.stage_idx]:
+            self.stage_idx += 1
+            self.consumed_in_stage = 0
+            if self.stage_idx >= len(self.survivors):
+                return True, 1, self.alpha_range[-1]  # iteration finished
+
+        return self.consumed_in_stage == 0, self.survivors[self.stage_idx], self.alpha_range[self.stage_idx - 1 if self.consumed_in_stage == 0 else self.stage_idx]
+
+
 
 def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
-                device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
+                device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float, alpha_low: float, alpha_high: float, keep: float):
+    fitness_function = lambda c: c.rank
+    current_alpha = alpha_low
 
-    def initialize_fields(model: torch.nn.Module) -> torch.nn.Module:
-        # fields related to profiling / state tracking
-        model.mean_loss = []
-        model.quantile_loss = []
-        model.seen_batches = 0
-
-        # fields related to optimization state
-        model.optimizer = optimizer_factory(model)
-        model.lr_decay = lr_decay_factory(model.optimizer)
-
-        return model
-
-    fitness_function = lambda c: numpy.mean(c.normalized_aulc)
     criterion = criterion_factory()
 
     amortized_flops = 0.0
     total_batches = 0
     total_time = 0
 
-    main_network = initialize_fields(model_factory().to(device))
-    children = []
+    halving_scheduler = lambda: (True, 1, alpha_high) # cheap hack to match expected output
+    children = [model_factory().to(device)]
+    children[0].optimizer = optimizer_factory(children[0])
 
     for current_epoch in range(1, epochs + 1):
-        pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))
-        pruned_fraction = pruning_strategy.pruned_fraction()
+        pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
+        pruned_fraction = pruning_strategy.pruned_fraction() # store new fraction
 
-        # reset fields
-        main_network.quantile_loss = []
-        main_network.mean_loss = []
+        # apply learning rate decay to children
+        if current_epoch > 1:
+            for child in children:
+                child.lr_decay.step()
 
         # log epoch start time
         start = time.perf_counter()
@@ -329,88 +359,92 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
         for (inputs, targets) in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
 
-            # update main network mask
-            if main_network.seen_batches % minibatch_budget == 0:
-                weight_donor = model_factory().to(device)
+            halving_time, survivor_count, current_alpha = halving_scheduler()
+
+            if halving_time and len(children) > 1:
+                children = rank_models(children, alpha=current_alpha)
+                children.sort(key=fitness_function)
+                print([(child.index, fitness_function(child)) for child in children])
+                amortized_flops += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children[survivor_count if survivor_count != 1 else 0:]]) # add flops of discarded
+                children = soft_top_k(children, select=survivor_count, decay_rate=decay_rate)
+
+                # reset tracked metrics
+                for child in children:
+                    child.quantile_loss = []
+                    child.mean_loss = []
+                    child.std_loss = []
+                    child.neuron_dormancy = []
+                    child.gradients = []
+
+            # do we schedule new gen?
+            if survivor_count == 1:
+                halving_scheduler = SuccessiveHalvingScheduler(minibatch_budget, offspring, keep=keep, alpha_range=(alpha_low, alpha_high))
+
+                # pick best model
+                best_model = children[0]
                 children = []
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
-                    clone = model_factory().to(device)
-                    clone.load_state_dict(main_network.state_dict())
-                    clone = update_mask(clone, warmup_strategy, pruning_strategy, regrowth_strategy)
+                    child = model_factory().to(device)
+                    child.load_state_dict(best_model.state_dict())
 
-                    child = initialize_fields(model_factory().to(device))
-                    child.load_state_dict(weight_donor.state_dict())
+                    child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
+
+                    # fields related to profiling / state tracking
                     child.index = child_index
+                    child.quantile_loss = []
+                    child.mean_loss = []
+                    child.std_loss = []
+                    child.neuron_dormancy = []
+                    child.gradients = []
 
-                    child = transplant_mask(clone, child, weight_reinitialization="zero")
-
-                    # if child_index != 1:
-                    #     child = transplant_mask(clone, child, weight_reinitialization="zero")
-                    # else:
-                    #     child = transplant_mask(main_network, child, weight_reinitialization="zero")
+                    # fields required to estimate (amortized) FLOP cost of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
+                    child.amortized_sample_cost = src.utilities.estimate_amortized_flops(child, warmup_strategy, train_loader, minibatch_budget)
+                    child.seen_batches = 0
 
                     child.train()
 
+                    # fields related to optimization state
                     child.optimizer = optimizer_factory(child)
-                    child.optimizer.load_state_dict(main_network.optimizer.state_dict())
+                    child.optimizer.load_state_dict(best_model.optimizer.state_dict())
                     child.lr_decay = lr_decay_factory(child.optimizer)
 
                     children.append(child)
 
-                # train offspring
-                for batch_index, (child_inputs, child_targets) in enumerate(cycle(train_loader)):
-                    child_inputs, child_targets = child_inputs.to(device), child_targets.to(device)
+            # train population
+            for child in children:
+                outputs, score = child(inputs)
+                loss = criterion(outputs, targets)
 
-                    if batch_index >= minibatch_budget:
-                        break
+                with torch.no_grad():
+                    child.quantile_loss.append(loss.quantile(q=0.5).item())
+                    child.mean_loss.append(loss.mean().item())
+                    child.std_loss.append(loss.std().item())
+                    child.neuron_dormancy.append(score)
+                    child.seen_batches += 1
+                    total_batches += 1
 
-                    for child in children:
-                        outputs, score = child(child_inputs)
-                        loss = criterion(outputs, child_targets)
+                child.optimizer.zero_grad()
+                loss.mean().backward()
 
-                        with torch.no_grad():
-                            child.quantile_loss.append(loss.quantile(q=0.5).item())
-                            child.mean_loss.append(loss.mean().item())
-                            child.seen_batches += 1
-                            total_batches += 1
+                gradients = []
+                for current_layer in child.model:
+                    if not isinstance(current_layer, src.network.detail.MaskedLayer):
+                        continue
 
-                        child.optimizer.zero_grad()
-                        loss.mean().backward()
-                        child.optimizer.step()
+                    if current_layer.layer.weight.grad is not None:
+                        gradients.append(current_layer.layer.weight.grad[current_layer.mask == 1].flatten())
+                child.gradients.append(torch.cat(gradients).cpu().numpy())
 
-                # pick best and transplant mask back to main network
-                children = normalized_aulc(children)
-                children.sort(key=fitness_function)
-                print([(child.index, fitness_function(child)) for child in children])
-                main_network = transplant_mask(soft_top_k(children, select=1, decay_rate=decay_rate)[0], main_network, weight_reinitialization="zero")
-
-            main_network.train()
-
-            # train main network
-            outputs, score = main_network(inputs)
-            loss = criterion(outputs, targets)
-
-            with torch.no_grad():
-                main_network.quantile_loss.append(loss.quantile(q=0.5).item())
-                main_network.mean_loss.append(loss.mean().item())
-                main_network.seen_batches += 1
-                total_batches += 1
-
-            main_network.optimizer.zero_grad()
-            loss.mean().backward()
-            main_network.optimizer.step()
+                child.optimizer.step()
 
         # log epoch end time
         end = time.perf_counter()
         total_time += end - start
 
-        # apply learning rate decay to main_network
-        main_network.lr_decay.step()
-
         # sort before logging
-        children = normalized_aulc(children)
+        children = rank_models(children, alpha=current_alpha)
         children.sort(key=fitness_function)
 
         # create log entry
@@ -420,37 +454,42 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
             "total_time": total_time,
             "epoch_time": end - start,
             "total_batches": total_batches,
+            "amortized_flops": amortized_flops + numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children]),
 
             # best member statistics
-            "mean_loss": numpy.mean(main_network.mean_loss),
-            "quantile_loss": numpy.mean(main_network.quantile_loss),
+            "current_best": children[0].index,
+            "quantile_loss": numpy.mean(children[0].quantile_loss),
+            "mean_loss": numpy.mean(children[0].mean_loss),
+            "std_loss": numpy.mean(children[0].std_loss),
+            "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
+            "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
+            "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
 
             # population statistics
-            "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
             "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
+            "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
+            "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
+            "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
+            "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
+            "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
 
             # miscellaneous
-            "expected_sparsity": main_network.expected_sparsity(),
-            "realized_sparsity": main_network.realized_sparsity(),
-            "active_weights": main_network.active_weights(),
-            "total_weights": main_network.total_weights(),
-            "learning_rate": main_network.optimizer.param_groups[0]["lr"],
+            "expected_sparsity": children[0].expected_sparsity(),
+            "realized_sparsity": children[0].realized_sparsity(),
+            "active_weights": children[0].active_weights(),
+            "total_weights": children[0].total_weights(),
+            "learning_rate": children[0].optimizer.param_groups[0]["lr"],
             "pruned_fraction": pruned_fraction,
         }
 
         # get accuracy at top-k of the best model under current fitness_function
-        for (level, value) in top_k_accuracy(main_network, test_loader, device, [1, 3, 5]).items():
+        for (level, value) in top_k_accuracy(children[0], test_loader, device, [1, 3, 5]).items():
             log_entry[level] = value
 
         # store log entry
         settings.logger.log(log_entry)
 
     return children[0]
-
-
-
-
-
 
 
 
