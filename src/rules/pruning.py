@@ -54,7 +54,7 @@ class MagnitudePruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        pruned_count = int(self._pruned_fraction * total_active)
+        pruned_count = max(int(self._pruned_fraction * total_active), 1)
 
         # select weights to remove
         mags = flat_weight[active_neurons].abs()
@@ -97,7 +97,7 @@ class UniformPruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        num_pruned = int(self._pruned_fraction * total_active)
+        num_pruned = max(int(self._pruned_fraction * total_active), 1)
 
         if num_pruned == 0:
             return 0, layer
@@ -146,7 +146,7 @@ class RSensitivityPruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        pruned_count = int(self._pruned_fraction * total_active)
+        pruned_count = max(int(self._pruned_fraction * total_active), 1)
 
         # compute sensitivity scores: |w| / |grad|
         abs_weight = flat_weight[active_neurons].abs()
