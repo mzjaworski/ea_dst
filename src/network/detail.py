@@ -14,11 +14,15 @@ class ActivationFunctionWrapper(torch.nn.Module):
     def dormancy_score(self, x: torch.Tensor, tau: float = 0.1) -> float: # The Dormant Neuron Phenomenon in Deep Reinforcement Learning
         if len(x.shape) == 2:
             expectation = x.mean(dim=0)
-            expectation = expectation / ((1.0 / expectation.shape[0]) * expectation.sum())
-            score = (expectation <= tau).int().sum() / expectation.shape[0]
-            return score.item()
+        elif len(x.shape) == 4:
+            expectation = x.mean(dim=(0, 2, 3))
         else:
-            raise RuntimeError("unsupported shape for the input!")
+            raise RuntimeError(f"unsupported shape for the input: {x.shape}")
+
+        # normalize
+        expectation = expectation / ((1.0 / expectation.shape[0]) * expectation.sum())
+        score = (expectation <= tau).int().sum() / expectation.shape[0]
+        return score.item()
 
 class MaskedWeight(torch.autograd.Function):
 

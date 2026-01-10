@@ -1,6 +1,9 @@
+from typing import Tuple, List
+
 import src.network.detail
 import torch
 import numpy
+
 
 def soft_top_k(data: torch.Tensor, select: int = 1, decay_rate: float = 1.5) -> torch.BoolTensor:
     data_count = data.numel()
@@ -48,15 +51,14 @@ def estimate_amortized_flops(model: torch.nn.Module, warmup_strategy: src.rules.
     sparse_flop_estimate = 0
 
     # here we esitmate FLOPs via registered hooks and (unfortunately) one forward pass to trigger them - which is NOT counted into the total
-    def hook_fn(module, input, _):
+    def estimate_flops(module: torch.nn.Module, input: torch.Tensor, output: torch.Tensor) -> None:
         nonlocal dense_flop_estimate, sparse_flop_estimate
-        if isinstance(module, src.network.detail.MaskedLayer):
-            _1, _2 = module.estimate_flops(input[0])
-            dense_flop_estimate += _1
-            sparse_flop_estimate += _2
+        _1, _2 = module.estimate_flops(input[0])
+        dense_flop_estimate += _1
+        sparse_flop_estimate += _2
 
     # register hooks
-    handles = [m.register_forward_hook(hook_fn) for m in model.modules()]
+    handles = [m.register_forward_hook(estimate_flops) for m in model.modules() if isinstance(m, src.network.detail.MaskedLayer)]
 
     # trigger hooks
     with torch.no_grad():
@@ -68,7 +70,7 @@ def estimate_amortized_flops(model: torch.nn.Module, warmup_strategy: src.rules.
 
     return warmup_strategy.amortized_flops(dense_flop_estimate, sparse_flop_estimate, minibatch_budget)
 
-def get_gradients(model: torch.nn.Module) -> numpy.ndarray:
+def extract_gradients(model: torch.nn.Module) -> numpy.ndarray:
     gradients = []
     for current_layer in model.modules():
         if not isinstance(current_layer, src.network.detail.MaskedLayer):
@@ -77,3 +79,7 @@ def get_gradients(model: torch.nn.Module) -> numpy.ndarray:
         if current_layer.layer.weight.grad is not None:
             gradients.append(current_layer.layer.weight.grad[current_layer.mask == 1].flatten())
     return torch.cat(gradients).cpu().numpy()
+
+
+
+# TODO function creating log entry

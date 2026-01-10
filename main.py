@@ -16,51 +16,10 @@ import src.rules.decay
 
 import argparse
 import settings
+import training_utilities
 import utilities
 import random
 import sys
-
-def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, prunning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth) -> torch.nn.Module:
-    model = warmup_strategy.apply(model)
-
-    # iterate over all layers
-    for layer in model.modules():
-        # we are interested only in custom MaskedLayers
-        if not isinstance(layer, src.network.detail.MaskedLayer):
-            continue
-
-        # apply removal/regrowth only for layers that actually require it
-        if layer.expected_sparsity() > 0.0:
-            pruned_count, pruned_layer = prunning_strategy.apply(layer)
-            regrowth_strategy.apply(pruned_count, pruned_layer)
-            # not assigning back should be safe as we deal with references
-
-    return model
-
-def top_k_accuracy(model: torch.nn.Module, testloader: DataLoader, device: torch.device, top_k: list[int]) -> dict[str, float]:
-    model.eval()
-    max_k = max(top_k)
-
-    correct = {k: 0 for k in top_k}
-    total = 0
-
-    with torch.no_grad():
-        for inputs, targets in testloader:
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-
-            outputs = model(inputs)
-            _, preds = outputs.topk(max_k, dim=1)
-            preds = preds.t()
-
-            matches = preds.eq(targets.view(1, -1))
-
-            for k in top_k:
-                correct[k] += matches[:k].any(dim=0).sum().item()
-
-            total += targets.size(0)
-
-    return {f"accuracy-top{k}": 100.0 * correct[k] / total for k in top_k}
 
 def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     data_count = len(candidates)
@@ -115,150 +74,70 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 0.7, eps: floa
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: DataLoader, test_loader: DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
+
+    statistics = {
+        "amortized_flops": 0.0,
+        "current_epoch": 0,
+        "epoch_start": 0,
+        "epoch_end": 0,
+        "total_time": 0,
+        "total_batches": 0,
+    }
+
     fitness_function = lambda c: c.rank
-    alpha = 0.5
-
     criterion = criterion_factory()
-
-    amortized_flops = 0.0
-    total_batches = 0
-    total_time = 0
+    alpha = 0.7
 
     children = []
     for current_epoch in range(1, epochs + 1):
+        statistics["current_epoch"] += 1
+        statistics["epoch_start"] = time.perf_counter()
+
         pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
-        pruned_fraction = pruning_strategy.pruned_fraction() # store new fraction
 
         # apply learning rate decay to children
         if len(children):
             for child in children:
                 child.lr_decay.step()
 
-        # log epoch start time
-        start = time.perf_counter()
-
         # train for one epoch
         for (inputs, targets) in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
 
             # update population
-            if (total_batches / offspring) % minibatch_budget == 0:
+            if (statistics["total_batches"] / offspring) % minibatch_budget == 0:
                 best_model = None
 
                 # pick best model
                 if len(children):
-                    # children = rank_models(children, alpha=1.0)
-                    # children.sort(key=fitness_function)
-                    # print([(child.index, fitness_function(child)) for child in children])
-                    #
-                    # children = rank_models(children, alpha=0.0)
-                    # children.sort(key=fitness_function)
-                    # print([(child.index, fitness_function(child)) for child in children])
-
                     children = rank_models(children, alpha=alpha)
                     children.sort(key=fitness_function)
                     print([(child.index, fitness_function(child)) for child in children])
-
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
-                    amortized_flops += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
+                    statistics["amortized_flops"] += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
                     children = []
-                else:
-                    best_model = model_factory().to(device)
-                    best_model.optimizer = optimizer_factory(best_model) # ensure it exists for downstream task
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
-                    # pruning_strategy.decay_pruned_fraction(src.rules.decay.ConstantDecay((pruned_fraction / offspring) * child_index).update(0))
-
-                    child = model_factory().to(device)
-                    child.load_state_dict(best_model.state_dict())
-
-                    child = update_mask(child, warmup_strategy, pruning_strategy, regrowth_strategy)
-
-                    # fields related to profiling / state tracking
+                    child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning_strategy, regrowth_strategy, train_loader, minibatch_budget, device)
                     child.index = child_index
-                    child.quantile_loss = []
-                    child.mean_loss = []
-                    child.std_loss = []
-                    child.neuron_dormancy = []
-                    child.gradients = []
-
-                    # fields required to estimate (amortized) FLOP cost of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
-                    child.amortized_sample_cost = src.utilities.estimate_amortized_flops(child, warmup_strategy, train_loader, minibatch_budget)
-                    child.seen_batches = 0
-
-                    child.train()
-
-                    # fields related to optimization state
-                    child.optimizer = optimizer_factory(child)
-                    child.optimizer.load_state_dict(best_model.optimizer.state_dict())
-                    child.lr_decay = lr_decay_factory(child.optimizer)
-
                     children.append(child)
 
             # train population
             for child in children:
-                outputs = child(inputs)
-                loss = criterion(outputs, targets)
-
-                with torch.no_grad():
-                    child.quantile_loss.append(loss.quantile(q=0.5).item())
-                    child.mean_loss.append(loss.mean().item())
-                    child.std_loss.append(loss.std().item())
-                    child.seen_batches += 1
-                    total_batches += 1
-
-                child.optimizer.zero_grad()
-                loss.mean().backward()
-                child.gradients.append(src.utilities.get_gradients(child))
-                child.optimizer.step()
+                training_utilities.forward_and_backward_with_statistics(child, criterion, inputs, targets)
+                statistics["total_batches"] += 1
 
         # log epoch end time
-        end = time.perf_counter()
-        total_time += end - start
+        statistics["epoch_end"] = time.perf_counter()
+        statistics["total_time"] += statistics["epoch_end"] - statistics["epoch_start"]
 
         # sort before logging
         children = rank_models(children, alpha=alpha)
         children.sort(key=fitness_function)
 
-        # create log entry
-        log_entry = {
-            # global info
-            "epoch": current_epoch,
-            "total_time": total_time,
-            "epoch_time": end - start,
-            "total_batches": total_batches,
-            "amortized_flops": amortized_flops + numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children]),
-
-            # best member statistics
-            "current_best": children[0].index,
-            "quantile_loss": numpy.mean(children[0].quantile_loss),
-            "mean_loss": numpy.mean(children[0].mean_loss),
-            "std_loss": numpy.mean(children[0].std_loss),
-            "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
-            "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
-
-            # population statistics
-            "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
-            "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
-            "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
-            "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
-            "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
-
-            # miscellaneous
-            "expected_sparsity": children[0].expected_sparsity(),
-            "realized_sparsity": children[0].realized_sparsity(),
-            "active_weights": children[0].active_weights(),
-            "total_weights": children[0].total_weights(),
-            "learning_rate": children[0].optimizer.param_groups[0]["lr"],
-            "pruned_fraction": pruned_fraction,
-        }
-
-        # get accuracy at top-k of the best model under current fitness_function
-        for (level, value) in top_k_accuracy(children[0], test_loader, device, [1, 3, 5]).items():
-            log_entry[level] = value
-
-        # store log entry
+        # log statistics
+        log_entry = training_utilities.generate_log_entry(statistics, children, train_loader, test_loader)
         settings.logger.log(log_entry)
 
     return children[0]
