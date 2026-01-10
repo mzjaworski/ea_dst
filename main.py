@@ -95,6 +95,9 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
         pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
 
+        # if len(children):
+        #     print(children[0].classifier.mask)
+
         # apply learning rate decay to children
         if len(children):
             for child in children:
@@ -137,7 +140,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         children.sort(key=fitness_function)
 
         # log statistics
-        log_entry = training_utilities.generate_log_entry(statistics, children, train_loader, test_loader)
+        log_entry = training_utilities.generate_log_entry(statistics, children, train_loader, test_loader, device)
         settings.logger.log(log_entry)
 
     return children[0]

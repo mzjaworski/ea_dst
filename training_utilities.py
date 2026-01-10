@@ -9,7 +9,6 @@ import torch
 import numpy
 
 def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoader, device: torch.device, top_k: list[int]) -> dict[str, float]:
-    model.eval()
     max_k = max(top_k)
 
     correct = {k: 0 for k in top_k}
@@ -66,7 +65,7 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
     model.mean_loss = []
     model.std_loss = []
     model.neuron_dormancy = []
-    model.gradients = []
+    # model.gradients = []
 
     # fields required to estimate (amortized) FLOPs of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
     model.amortized_sample_cost = src.utilities.estimate_amortized_flops(model, warmup_strategy, train_loader, minibatch_budget)
@@ -110,7 +109,7 @@ def forward_and_backward_with_statistics(model: torch.nn.Module, criterion: torc
         model.mean_loss.append(loss.mean().item())
         model.std_loss.append(loss.std().item())
         model.seen_batches += 1
-        model.gradients.append(src.utilities.extract_gradients(model))
+        #model.gradients.append(src.utilities.extract_gradients(model)) # TODO figure out how to summarize this efficiently
         model.neuron_dormancy.append(scores)
 
     model.optimizer.step()
@@ -118,7 +117,7 @@ def forward_and_backward_with_statistics(model: torch.nn.Module, criterion: torc
     return model
 
 # helper for generating population level statistics
-def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader) -> dict:
+def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader, device: torch.device) -> dict:
 
     # create log entry
     log_entry = {
@@ -134,16 +133,16 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "quantile_loss": numpy.mean(children[0].quantile_loss),
         "mean_loss": numpy.mean(children[0].mean_loss),
         "std_loss": numpy.mean(children[0].std_loss),
-        "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
-        "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
+        # "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
+        # "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
         "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
 
         # population statistics
         "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
         "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
         "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
-        "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
-        "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
+        # "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
+        # "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
         "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
 
         # miscellaneous
@@ -156,7 +155,9 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
     }
 
     # get accuracy at top-k of the best model under current fitness_function
-    for (level, value) in top_k_accuracy(children[0], test_loader, next(children[0].parameters()).device, [1, 3, 5]).items():
+    children[0].eval()
+    for (level, value) in top_k_accuracy(children[0], test_loader, device, [1, 3, 5]).items():
         log_entry[level] = value
+    children[0].train()
 
     return log_entry
