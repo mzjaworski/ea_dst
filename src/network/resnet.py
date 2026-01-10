@@ -12,7 +12,6 @@ Reference:
     Deep Residual Learning for Image Recognition. arXiv:1512.03385
 '''
 from typing import List
-
 import src.network.detail
 import torch
 
@@ -75,6 +74,7 @@ class Bottleneck(torch.nn.Module):
 
 
 class ResNet(src.network.detail.NetworkInterface):
+
     def __init__(self, block: torch.nn.Module, num_blocks: List[int], num_classes: int, sparsity: float):
         super(ResNet, self).__init__()
         self.in_planes = 64
@@ -89,7 +89,7 @@ class ResNet(src.network.detail.NetworkInterface):
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2, sparsity=sparsity)
         self.linear = src.network.detail.MaskedLayer(torch.nn.Linear(512*block.expansion, num_classes), sparsity)
 
-    def _make_layer(self, block: torch.nn.Module, planes: int, num_blocks: int, stride: int, sparsity: float):
+    def _make_layer(self, block: torch.nn.Module, planes: int, num_blocks: int, stride: int, sparsity: float) -> torch.nn.Sequential:
         strides = [stride] + [1]*(num_blocks-1)
         layers = []
         for stride in strides:
@@ -97,7 +97,7 @@ class ResNet(src.network.detail.NetworkInterface):
             self.in_planes = planes * block.expansion
         return torch.nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.relu1(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
@@ -108,17 +108,17 @@ class ResNet(src.network.detail.NetworkInterface):
         out = self.linear(out)
         return out
 
-def resnet18(**kwargs):
+def resnet18(**kwargs) -> src.network.detail.NetworkInterface:
     return ResNet(block=BasicBlock, num_blocks=[2, 2, 2, 2], **kwargs)
 
-def resnet34(**kwargs):
+def resnet34(**kwargs) -> src.network.detail.NetworkInterface:
     return ResNet(block=BasicBlock, num_blocks=[3, 4, 6, 3], **kwargs)
 
-def resnet50(**kwargs):
+def resnet50(**kwargs) -> src.network.detail.NetworkInterface:
     return ResNet(block=Bottleneck, num_blocks=[3, 4, 6, 3], **kwargs)
 
-def resnet101(**kwargs):
+def resnet101(**kwargs) -> src.network.detail.NetworkInterface:
     return ResNet(block=Bottleneck, num_blocks=[3, 4, 23, 3], **kwargs)
 
-def resnet152(**kwargs):
+def resnet152(**kwargs) -> src.network.detail.NetworkInterface:
     return ResNet(block=Bottleneck, num_blocks=[3, 8, 36, 3], **kwargs)
