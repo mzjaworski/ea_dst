@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from typing import Tuple
 import torch
 
@@ -64,30 +65,45 @@ class MaskedLayer(torch.nn.Module):
     def total_weights(self) -> int:
         return self.mask.numel()
 
-    def estimate_flops(self, input_shape) -> Tuple[int, int]:
+    def estimate_flops(self, input_tensor: torch.Tensor) -> Tuple[int, int]:
         def flop_estimate(non_zero: int):
             # now estimate effective flop count based on type of layer
             if isinstance(self.layer, torch.nn.Linear):
                 weight_flops = 2.0 * non_zero
                 bias_flops = self.layer.out_features if self.layer.bias is not None else 0
                 return weight_flops + bias_flops
-            elif isinstance(self.layer, torch.nn.Conv2d): # TODO this branch has to be verified!
-                H_in, W_in, C_in = input_shape
+            elif isinstance(self.layer, torch.nn.Conv2d):
+                _, _, H_in, W_in = input_tensor.shape
 
-                # verify that input channels match
-                if C_in != self.layer.in_channels:
-                    raise RuntimeError(f"Input channels {C_in} do not match layer in_channels {self.layer.in_channels}")
+                Kh, Kw = self.layer.kernel_size
+                Sh, Sw = self.layer.stride
+                Ph, Pw = self.layer.padding
+                Dh, Dw = self.layer.dilation
 
-                # estimate spatial dimensions of the output
-                H_out = (H_in + 2 * self.layer.padding[0] - self.layer.dilation[0] * (
-                            self.layer.kernel_size[0] - 1) - 1) // self.layer.stride[0] + 1
-                W_out = (W_in + 2 * self.layer.padding[1] - self.layer.dilation[1] * (
-                            self.layer.kernel_size[1] - 1) - 1) // self.layer.stride[1] + 1
+                H_out = (H_in + 2 * Ph - Dh * (Kh - 1) - 1) // Sh + 1
+                W_out = (W_in + 2 * Pw - Dw * (Kw - 1) - 1) // Sw + 1
 
-                weight_flops = 2 * non_zero * H_out * W_out
+                weight_flops = 2 * (non_zero / self.layer.out_channels) * H_out * W_out
                 bias_flops = self.layer.out_channels * H_out * W_out if self.layer.bias is not None else 0
 
                 return weight_flops + bias_flops
             raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
         return flop_estimate(self.total_weights()), flop_estimate(self.active_weights())
+
+class NetworkInterface(torch.nn.Module, ABC):
+
+    def expected_sparsity(self) -> float:
+        data = [layer.expected_sparsity() for layer in self.modules() if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def realized_sparsity(self) -> float:
+        data = [layer.realized_sparsity() for layer in self.modules() if isinstance(layer, MaskedLayer)]
+        return sum(data) / len(data)
+
+    def active_weights(self) -> int:
+        return sum(
+            [layer.active_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])
+
+    def total_weights(self) -> int:
+        return sum([layer.total_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])

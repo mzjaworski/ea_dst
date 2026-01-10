@@ -24,7 +24,7 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
     model = warmup_strategy.apply(model)
 
     # iterate over all layers
-    for layer in model.model:
+    for layer in model.modules():
         # we are interested only in custom MaskedLayers
         if not isinstance(layer, src.network.detail.MaskedLayer):
             continue
@@ -49,7 +49,7 @@ def top_k_accuracy(model: torch.nn.Module, testloader: DataLoader, device: torch
             inputs = inputs.to(device)
             targets = targets.to(device)
 
-            outputs, _ = model(inputs)
+            outputs = model(inputs)
             _, preds = outputs.topk(max_k, dim=1)
             preds = preds.t()
 
@@ -86,16 +86,14 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 0.7, eps: floa
 
     # get loss and its change
     loss = numpy.array([c.mean_loss for c in candidates])
-    # diff = numpy.abs(numpy.diff(loss, axis=1))
-    #
-    # # align loss with change
-    # loss = loss[:, 1:]
+    diff = numpy.abs(numpy.diff(loss, axis=1))
+
+    # align loss with change
+    loss = loss[:, 1:]
 
     # compute per candidate averages
     loss_score = numpy.mean(loss, axis=1)
-    # diff_score = numpy.mean(diff, axis=1)
-    diff_score = numpy.array([-numpy.mean(numpy.sum(numpy.array(candidate.gradients) ** 2, axis=1)) / (numpy.sum(numpy.var(numpy.array(candidate.gradients), axis=0)) + 1e-8) for candidate in candidates])
-
+    diff_score = numpy.mean(diff, axis=1)
 
     # assign ranks
     loss_rank = numpy.argsort(numpy.argsort(loss_score))
@@ -200,29 +198,19 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
             # train population
             for child in children:
-                outputs, score = child(inputs)
+                outputs = child(inputs)
                 loss = criterion(outputs, targets)
 
                 with torch.no_grad():
                     child.quantile_loss.append(loss.quantile(q=0.5).item())
                     child.mean_loss.append(loss.mean().item())
                     child.std_loss.append(loss.std().item())
-                    child.neuron_dormancy.append(score)
                     child.seen_batches += 1
                     total_batches += 1
 
                 child.optimizer.zero_grad()
                 loss.mean().backward()
-
-                gradients = []
-                for current_layer in child.model:
-                    if not isinstance(current_layer, src.network.detail.MaskedLayer):
-                        continue
-
-                    if current_layer.layer.weight.grad is not None:
-                        gradients.append(current_layer.layer.weight.grad[current_layer.mask == 1].flatten())
-                child.gradients.append(torch.cat(gradients).cpu().numpy())
-
+                child.gradients.append(src.utilities.get_gradients(child))
                 child.optimizer.step()
 
         # log epoch end time
@@ -247,7 +235,6 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             "quantile_loss": numpy.mean(children[0].quantile_loss),
             "mean_loss": numpy.mean(children[0].mean_loss),
             "std_loss": numpy.mean(children[0].std_loss),
-            "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
             "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
             "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
 
@@ -255,7 +242,6 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
             "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
             "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
             "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
-            "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
             "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
             "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
 
@@ -373,7 +359,6 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
                     child.quantile_loss = []
                     child.mean_loss = []
                     child.std_loss = []
-                    child.neuron_dormancy = []
                     child.gradients = []
 
             # do we schedule new gen?
@@ -396,7 +381,6 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
                     child.quantile_loss = []
                     child.mean_loss = []
                     child.std_loss = []
-                    child.neuron_dormancy = []
                     child.gradients = []
 
                     # fields required to estimate (amortized) FLOP cost of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
@@ -414,14 +398,13 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
 
             # train population
             for child in children:
-                outputs, score = child(inputs)
+                outputs = child(inputs)
                 loss = criterion(outputs, targets)
 
                 with torch.no_grad():
                     child.quantile_loss.append(loss.quantile(q=0.5).item())
                     child.mean_loss.append(loss.mean().item())
                     child.std_loss.append(loss.std().item())
-                    child.neuron_dormancy.append(score)
                     child.seen_batches += 1
                     total_batches += 1
 
@@ -461,7 +444,6 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
             "quantile_loss": numpy.mean(children[0].quantile_loss),
             "mean_loss": numpy.mean(children[0].mean_loss),
             "std_loss": numpy.mean(children[0].std_loss),
-            "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
             "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
             "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
 
@@ -469,7 +451,6 @@ def train_epoch_v2(model_factory, optimizer_factory, lr_decay_factory, criterion
             "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
             "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
             "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
-            "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
             "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
             "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
 

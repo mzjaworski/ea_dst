@@ -5,7 +5,7 @@ import src.network.detail
 import torch
 import numpy
 
-class SparseANN(torch.nn.Module):
+class SparseANN(src.network.detail.NetworkInterface):
     def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
         super().__init__()
 
@@ -30,31 +30,12 @@ class SparseANN(torch.nn.Module):
 
         self.model = torch.nn.Sequential(*layers)
 
-    def expected_sparsity(self) -> float:
-        data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, src.network.detail.MaskedLayer)]
-        return sum(data) / len(data)
-
-    def realized_sparsity(self) -> float:
-        data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, src.network.detail.MaskedLayer)]
-        return sum(data) / len(data)
-
-    def active_weights(self) -> int:
-        return sum([layer.active_weights() for layer in self.model if isinstance(layer, src.network.detail.MaskedLayer)])
-
-    def total_weights(self) -> int:
-        return sum([layer.total_weights() for layer in self.model if isinstance(layer, src.network.detail.MaskedLayer)])
-
-    def forward(self, x) -> Tuple[torch.Tensor, float]:
-        scores = []
-
+    def forward(self, x) -> torch.Tensor:
         for layer in self.model:
             x = layer(x)
-            if isinstance(layer, src.network.detail.ActivationFunctionWrapper):
-                scores.append(layer.dormancy_score(x, 0.1))
+        return x
 
-        return x, numpy.mean(scores)
-
-class DenseANNFromSparseANN(torch.nn.Module):
+class DenseANNFromSparseANN(src.network.detail.NetworkInterface):
     def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
         super().__init__()
 
@@ -83,26 +64,7 @@ class DenseANNFromSparseANN(torch.nn.Module):
 
         self.model = torch.nn.Sequential(*layers)
 
-    def expected_sparsity(self) -> float:
-        data = [layer.expected_sparsity() for layer in self.model if isinstance(layer, src.network.detail.MaskedLayer)]
-        return sum(data) / len(data)
-
-    def realized_sparsity(self) -> float:
-        data = [layer.realized_sparsity() for layer in self.model if isinstance(layer, src.network.detail.MaskedLayer)]
-        return sum(data) / len(data)
-
-    def active_weights(self) -> int:
-        return sum([layer.active_weights() for layer in self.model if isinstance(layer, src.network.detail.MaskedLayer)])
-
-    def total_weights(self) -> int:
-        return sum([layer.total_weights() for layer in self.model if isinstance(layer, src.network.detail.MaskedLayer)])
-
-    def forward(self, x) -> Tuple[torch.Tensor, float]:
-        scores = []
-
+    def forward(self, x) -> torch.Tensor:
         for layer in self.model:
             x = layer(x)
-            if isinstance(layer, src.network.detail.ActivationFunctionWrapper):
-                scores.append(layer.dormancy_score(x, 0.1))
-
-        return x, numpy.mean(scores)
+        return x
