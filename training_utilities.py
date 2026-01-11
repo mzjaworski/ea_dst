@@ -50,6 +50,14 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
 
     return model
 
+def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
+    model.median_loss = []
+    model.mean_loss = []
+    model.std_loss = []
+    model.neuron_dormancy = []
+    # model.gradients = []
+    return model
+
 # instantiates network with all statistics to track
 def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device) -> torch.nn.Module:
     model = model_factory().to(device)
@@ -59,13 +67,7 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
 
     model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
     model.pruned_fraction = pruning_strategy.pruned_fraction()
-
-    # fields related to profiling / state tracking
-    model.quantile_loss = []
-    model.mean_loss = []
-    model.std_loss = []
-    model.neuron_dormancy = []
-    # model.gradients = []
+    model = reset_tracked_fields(model)
 
     # fields required to estimate (amortized) FLOPs of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
     model.amortized_sample_cost = src.utilities.estimate_amortized_flops(model, warmup_strategy, train_loader, minibatch_budget)
@@ -105,12 +107,12 @@ def forward_and_backward_with_statistics(model: torch.nn.Module, criterion: torc
 
     # store stats
     with torch.no_grad():
-        model.quantile_loss.append(loss.quantile(q=0.5).item())
+        model.median_loss.append(loss.quantile(q=0.5).item())
         model.mean_loss.append(loss.mean().item())
         model.std_loss.append(loss.std().item())
-        model.seen_batches += 1
-        #model.gradients.append(src.utilities.extract_gradients(model)) # TODO figure out how to summarize this efficiently
         model.neuron_dormancy.append(scores)
+        #model.gradients.append(src.utilities.extract_gradients(model)) # TODO figure out how to summarize this efficiently
+        model.seen_batches += 1
 
     model.optimizer.step()
 
@@ -130,7 +132,7 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
 
         # best member statistics
         "current_best": children[0].index,
-        "quantile_loss": numpy.mean(children[0].quantile_loss),
+        "median_loss": numpy.mean(children[0].median_loss),
         "mean_loss": numpy.mean(children[0].mean_loss),
         "std_loss": numpy.mean(children[0].std_loss),
         # "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
@@ -138,7 +140,7 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
 
         # population statistics
-        "p_quantile_loss": numpy.mean([numpy.mean(child.quantile_loss) for child in children]),
+        "p_median_loss": numpy.mean([numpy.mean(child.median_loss) for child in children]),
         "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
         "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
         # "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
@@ -154,7 +156,7 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "pruned_fraction": children[0].pruned_fraction,
     }
 
-    # get accuracy at top-k of the best model under current fitness_function
+    # NOTE: this assumes children are already sorted using their fitness!
     children[0].eval()
     for (level, value) in top_k_accuracy(children[0], test_loader, device, [1, 3, 5]).items():
         log_entry[level] = value
