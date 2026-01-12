@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 import src.rules.warmup
 import src.rules.pruning
@@ -50,6 +50,18 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
 
     return model
 
+def initialize_statistics() -> Dict:
+    return {
+        "amortized_flops": 0.0,
+        "current_epoch": 0,
+        "epoch_start": 0,
+        "epoch_end": 0,
+        "total_time": 0,
+        "total_batches": 0,
+        "diversity": 0,
+        "total_unique_batches": 0,
+    }
+
 def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
     model.median_loss = []
     model.mean_loss = []
@@ -86,37 +98,67 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
     return model
 
 # helper for running forward/backward pass that computes all scores
-def forward_and_backward_with_statistics(model: torch.nn.Module, criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor) -> torch.nn.Module:
-    scores = []
+def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict) -> Tuple[torch.nn.Module, Dict]:
 
-    def compute_dormancy_score(module: torch.nn.Module, input: torch.Tensor, output: torch.Tensor) -> None:
-        nonlocal scores
-        scores.append(module.dormancy_score(output))
+    logits = []
+    for model in models:
+        statistics["total_batches"] += 1
 
-    # compute forward with neuron dormancy
-    handles = [m.register_forward_hook(compute_dormancy_score) for m in model.modules() if isinstance(m, src.network.detail.ActivationFunctionWrapper)]
-    outputs = model(input)
-    for h in handles:
-        h.remove()
+        scores = []
+        def compute_dormancy_score(module: torch.nn.Module, input: torch.Tensor, output: torch.Tensor) -> None:
+            nonlocal scores
+            scores.append(module.dormancy_score(output))
 
-    # get loss
-    loss = criterion(outputs, targets)
+        # compute forward with neuron dormancy
+        handles = [m.register_forward_hook(compute_dormancy_score) for m in model.modules() if isinstance(m, src.network.detail.ActivationFunctionWrapper)]
+        outputs = model(input)
+        for h in handles:
+            h.remove()
 
-    model.optimizer.zero_grad()
-    loss.mean().backward()
+        # get loss
+        loss = criterion(outputs, targets)
 
-    # store stats
+        model.optimizer.zero_grad()
+        loss.mean().backward()
+
+        # store stats
+        with torch.no_grad():
+            model.median_loss.append(loss.quantile(q=0.5).item())
+            model.mean_loss.append(loss.mean().item())
+            model.std_loss.append(loss.std().item())
+            model.neuron_dormancy.append(scores)
+            #model.gradients.append(src.utilities.extract_gradients(model)) # TODO figure out how to summarize this efficiently
+            model.seen_batches += 1
+
+        model.optimizer.step()
+        logits.append(outputs)
+
     with torch.no_grad():
-        model.median_loss.append(loss.quantile(q=0.5).item())
-        model.mean_loss.append(loss.mean().item())
-        model.std_loss.append(loss.std().item())
-        model.neuron_dormancy.append(scores)
-        #model.gradients.append(src.utilities.extract_gradients(model)) # TODO figure out how to summarize this efficiently
-        model.seen_batches += 1
+        statistics["diversity"] += compute_diversity(torch.stack(logits, dim=1), targets)
+        statistics["total_unique_batches"] += 1
 
-    model.optimizer.step()
+    return models, statistics
 
-    return model
+# Theorem 1 - "Diversity and Generalization in Neural Network Ensembles"
+def compute_diversity(logits: torch.Tensor, targets: torch.Tensor) -> float:
+    batch_count, model_count, class_count = logits.shape
+    probabilities = torch.softmax(logits, dim=-1)
+
+    # p_{i,k}
+    true_class_probabilities = probabilities[
+        torch.arange(batch_count, device=logits.device)[:, None],
+        torch.arange(model_count, device=logits.device)[None, :],
+        targets[:, None]
+    ]
+
+    # max_k p_{i,k}
+    normalization = true_class_probabilities.max(dim=1, keepdim=True).values  # (B, 1)
+    p_tilde = true_class_probabilities / torch.sqrt(2.0 * normalization)
+
+    mean = p_tilde.mean(dim=1)
+    var = (p_tilde ** 2).mean(dim=1) - mean ** 2
+
+    return var.mean().cpu().item()
 
 # helper for generating population level statistics
 def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader, device: torch.device) -> dict:
@@ -129,6 +171,7 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "epoch_time": statistics["epoch_end"] - statistics["epoch_start"],
         "total_batches": statistics["total_batches"],
         "amortized_flops": statistics["amortized_flops"] + numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children]),
+        "diversity": statistics["diversity"] / statistics["total_unique_batches"],
 
         # best member statistics
         "current_best": children[0].index,

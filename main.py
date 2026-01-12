@@ -109,15 +109,7 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: floa
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
-
-    statistics = {
-        "amortized_flops": 0.0,
-        "current_epoch": 0,
-        "epoch_start": 0,
-        "epoch_end": 0,
-        "total_time": 0,
-        "total_batches": 0,
-    }
+    statistics = training_utilities.initialize_statistics()
 
     fitness_function = lambda c: c.rank
     criterion = criterion_factory()
@@ -159,9 +151,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     children.append(child)
 
             # train population
-            for child in children:
-                training_utilities.forward_and_backward_with_statistics(child, criterion, inputs, targets)
-                statistics["total_batches"] += 1
+            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics)
 
         # log epoch end time
         statistics["epoch_end"] = time.perf_counter()
@@ -180,15 +170,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float, alpha_low: float, alpha_high: float, keep: float):
-
-    statistics = {
-        "amortized_flops": 0.0,
-        "current_epoch": 0,
-        "epoch_start": 0,
-        "epoch_end": 0,
-        "total_time": 0,
-        "total_batches": 0,
-    }
+    statistics = training_utilities.initialize_statistics()
 
     fitness_function = lambda c: c.rank
     criterion = criterion_factory()
@@ -237,9 +219,7 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
                     children.append(child)
 
             # train population
-            for child in children:
-                training_utilities.forward_and_backward_with_statistics(child, criterion, inputs, targets)
-                statistics["total_batches"] += 1
+            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics)
 
         # log epoch end time
         statistics["epoch_end"] = time.perf_counter()
