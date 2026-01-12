@@ -1,0 +1,13 @@
+{
+  "log": "./data/logs/cifar10/small_dense/99/LOG_IDENTIFIER",
+  "model": {"type": "src.network.custom.DenseANNFromSparseANN", "kwargs": {"in_features": 3072, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 10, "sparsity": 0.99, "act": "relu", "layernorm": true}},
+  "dataset": {"type": "dataset.cifar10.CIFAR10", "kwargs": {"train_batch": 128, "test_batch": 512, "resize": [32, 32], "flatten": true, "device": "DEVICE_LOCATION"}},
+  "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.005, "momentum": 0.0, "weight_decay": 0.0005}},
+  "lr_decay": {"type": "torch.optim.lr_scheduler.ExponentialLR", "kwargs": {"gamma": 0.985}},
+  "criterion": {"type": "torch.nn.CrossEntropyLoss", "kwargs": {"reduction": "none"}},
+  "warmup": {"type": "src.rules.warmup.NullWarmup", "kwargs": {}},
+  "pruning": {"type": "src.rules.pruning.NullPruning", "kwargs": {}},
+  "regrowth": {"type": "src.rules.regrowth.NullRegrowth", "kwargs": {}},
+  "decay": {"type": "src.rules.decay.NullDecay", "kwargs": {}},
+  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "offspring": 1, "decay_rate": null, "minibatch_budget": 512}}
+}

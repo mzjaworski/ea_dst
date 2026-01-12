@@ -22,6 +22,17 @@ class NullDecay(DecayStrategy):
     def decay(self, value: float) -> float:
         return value
 
+class ConstantDecay(DecayStrategy):
+
+    def __init__(self, constant: float):
+        self.constant = constant
+
+    def update(self, value: float) -> Self:
+        return self
+
+    def decay(self, value: float) -> float:
+        return self.constant
+
 class LinearDecay(DecayStrategy):
 
     def __init__(self, step: float):
