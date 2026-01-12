@@ -50,6 +50,7 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
 
     return model
 
+# some statistics have to be tracked globally
 def initialize_statistics() -> Dict:
     return {
         "amortized_flops": 0.0,
@@ -59,7 +60,7 @@ def initialize_statistics() -> Dict:
         "total_time": 0,
         "total_batches": 0,
         "diversity": 0,
-        "total_unique_batches": 0,
+        "epoch_batch": 0,
     }
 
 def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
@@ -134,8 +135,8 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
         logits.append(outputs)
 
     with torch.no_grad():
-        statistics["diversity"] += compute_diversity(torch.stack(logits, dim=1), targets)
-        statistics["total_unique_batches"] += 1
+        statistics["diversity"] = (statistics["diversity"] if statistics["epoch_batch"] else 0) + compute_diversity(torch.stack(logits, dim=1), targets)
+        statistics["epoch_batch"] += 1
 
     return models, statistics
 
@@ -171,7 +172,7 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "epoch_time": statistics["epoch_end"] - statistics["epoch_start"],
         "total_batches": statistics["total_batches"],
         "amortized_flops": statistics["amortized_flops"] + numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children]),
-        "diversity": statistics["diversity"] / statistics["total_unique_batches"],
+        "diversity": statistics["diversity"] / statistics["epoch_batch"],
 
         # best member statistics
         "current_best": children[0].index,

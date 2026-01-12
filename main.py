@@ -71,40 +71,56 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     selected_indices = numpy.random.choice(data_count, size=select, replace=False, p=probabilities)
     return [candidates[i] for i in selected_indices]
 
+# magnitude based ordering
 def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
-
-    if len(candidates) < 2 or len(candidates[0].mean_loss) < 2:
-        for c in candidates:
-            c.rank = 0.0
-        return candidates
-
-    # get loss and its change
     loss = numpy.array([c.mean_loss for c in candidates])
     diff = numpy.abs(numpy.diff(loss, axis=1))
 
-    # align loss with change
-    loss = loss[:, 1:]
-
-    # compute per candidate averages
-    loss_score = numpy.mean(loss, axis=1)
-    diff_score = numpy.mean(diff, axis=1)
-
-    # assign ranks
-    loss_rank = numpy.argsort(numpy.argsort(loss_score))
-    diff_rank = numpy.argsort(numpy.argsort(diff_score))
-
-    # normalize in [0, 1]
-    N = len(candidates)
-    loss_rank = loss_rank / (N - 1 + eps)
-    diff_rank = diff_rank / (N - 1 + eps)
-
-    # combine based on alpha
-    final_rank = alpha * loss_rank + (1.0 - alpha) * diff_rank
+    pop_loss = loss.mean(axis=0)
+    pop_diff = diff.mean(axis=0)
 
     for i, c in enumerate(candidates):
-        c.rank = final_rank[i]
+        level = loss[i][1:] / (pop_loss[1:] + eps)
+        slope = diff[i] / (pop_diff + eps)
+        c.rank = numpy.mean(alpha * level + (1.0 - alpha) * slope)
 
     return candidates
+
+# # rank based ordering
+# def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
+#
+#     if len(candidates) < 2 or len(candidates[0].mean_loss) < 2:
+#         for c in candidates:
+#             c.rank = 0.0
+#         return candidates
+#
+#     # get loss and its change
+#     loss = numpy.array([c.mean_loss for c in candidates])
+#     diff = numpy.abs(numpy.diff(loss, axis=1))
+#
+#     # align loss with change
+#     loss = loss[:, 1:]
+#
+#     # compute per candidate averages
+#     loss_score = numpy.mean(loss, axis=1)
+#     diff_score = numpy.mean(diff, axis=1)
+#
+#     # assign ranks
+#     loss_rank = numpy.argsort(numpy.argsort(loss_score))
+#     diff_rank = numpy.argsort(numpy.argsort(diff_score))
+#
+#     # normalize in [0, 1]
+#     N = len(candidates)
+#     loss_rank = loss_rank / (N - 1 + eps)
+#     diff_rank = diff_rank / (N - 1 + eps)
+#
+#     # combine based on alpha
+#     final_rank = alpha * loss_rank + (1.0 - alpha) * diff_rank
+#
+#     for i, c in enumerate(candidates):
+#         c.rank = final_rank[i]
+#
+#     return candidates
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
@@ -118,6 +134,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
     children = []
     for current_epoch in range(1, epochs + 1):
         statistics["current_epoch"] += 1
+        statistics["epoch_batch"] = 0
         statistics["epoch_start"] = time.perf_counter()
 
         pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
@@ -169,11 +186,12 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
 def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
-                device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float, alpha_low: float, alpha_high: float, keep: float):
+                device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float, keep: float):
     statistics = training_utilities.initialize_statistics()
 
     fitness_function = lambda c: c.rank
     criterion = criterion_factory()
+    alpha_low, alpha_high = [1.0, 1.0]
     current_alpha = alpha_low
 
     halving_scheduler = lambda: (False, 1, alpha_high)  # cheap hack to match expected output indicating we have to generate new population
@@ -181,6 +199,7 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
     children = []
     for current_epoch in range(1, epochs + 1):
         statistics["current_epoch"] += 1
+        statistics["epoch_batch"] = 0
         statistics["epoch_start"] = time.perf_counter()
 
         pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))  # update fraction
