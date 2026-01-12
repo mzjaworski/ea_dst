@@ -134,7 +134,6 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
     children = []
     for current_epoch in range(1, epochs + 1):
         statistics["current_epoch"] += 1
-        statistics["epoch_batch"] = 0
         statistics["epoch_start"] = time.perf_counter()
 
         pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
@@ -199,7 +198,6 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
     children = []
     for current_epoch in range(1, epochs + 1):
         statistics["current_epoch"] += 1
-        statistics["epoch_batch"] = 0
         statistics["epoch_start"] = time.perf_counter()
 
         pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))  # update fraction
