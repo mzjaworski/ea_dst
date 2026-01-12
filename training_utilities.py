@@ -145,16 +145,14 @@ def compute_diversity(logits: torch.Tensor, targets: torch.Tensor) -> float:
     batch_count, model_count, class_count = logits.shape
     probabilities = torch.softmax(logits, dim=-1)
 
-    # p_{i,k}
     true_class_probabilities = probabilities[
         torch.arange(batch_count, device=logits.device)[:, None],
         torch.arange(model_count, device=logits.device)[None, :],
         targets[:, None]
     ]
 
-    # max_k p_{i,k}
-    normalization = true_class_probabilities.max(dim=1, keepdim=True).values  # (B, 1)
-    p_tilde = true_class_probabilities / torch.sqrt(2.0 * normalization)
+    normalization = true_class_probabilities.max(dim=1, keepdim=True).values
+    p_tilde = true_class_probabilities / (torch.sqrt(torch.tensor(2.0)) * normalization)
 
     mean = p_tilde.mean(dim=1)
     var = (p_tilde ** 2).mean(dim=1) - mean ** 2
