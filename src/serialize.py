@@ -21,9 +21,7 @@ class NullSerialization(Serialization):
 class FileSystemSerialization(Serialization):
 
     def __init__(self, path: str) -> None:
-        print(path)
         self.path = os.path.dirname(path)
-        print(self.path)
         os.makedirs(self.path, exist_ok=True)
 
     def __next_file_name(self) -> str:

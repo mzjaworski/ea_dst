@@ -41,11 +41,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
 
     parser.add_argument('--configuration', default=None, type=json.loads, help="experiment template to run")
-    parser.add_argument('--devices', default='["cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5"]', type=json.loads, help="devices on which we will run in parallel processing")
+    parser.add_argument('--devices', default='["cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5", "cuda:6", "cuda:7"]', type=json.loads, help="devices on which we will run in parallel processing")
     parser.add_argument('--device_needle', default="DEVICE_LOCATION", type=str, help='string that will be replaced with passed device')
     parser.add_argument('--log_needle', default="LOG_IDENTIFIER", type=str, help='string that will be replaced with run ID')
-    parser.add_argument('--runs', default=5, type=int, help='number of parallel experiments to run')
-    parser.add_argument('--workers', default=5 * 6, type=int, help='number of parallel workers')
+    parser.add_argument('--runs', default=10, type=int, help='number of parallel experiments to run')
+    parser.add_argument('--workers', default=4 * 7, type=int, help='number of parallel workers')
 
     # parse args
     args = parser.parse_args()
@@ -79,6 +79,12 @@ if __name__ == "__main__":
             command = copy.deepcopy(configuration)
             directory, filename = os.path.split(command['log'])
             command['log'] = os.path.join(directory, replace_all(filename, args.log_needle, file_names[run_index])) # a bit excessive
+            
+            if "serialize" in command:
+                if "kwargs" in command['serialize']:
+                    if "path" in command['serialize']["kwargs"]:
+                        command['serialize']["kwargs"]["path"] = replace_all(command['serialize']["kwargs"]["path"], args.log_needle, file_names[run_index])
+            
             command = f"echo '{json.dumps(command)}' | python ./main.py" # not platform-agnostic
             commands.append(command)
 
