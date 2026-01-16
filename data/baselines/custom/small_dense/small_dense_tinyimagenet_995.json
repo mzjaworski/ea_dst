@@ -1,5 +1,5 @@
 {
-  "log": "./data/logs/tiny_imagenet/small_dense/995/LOG_IDENTIFIER",
+  "log": "./data/logs/tiny_imagenet/custom/small_dense/995/LOG_IDENTIFIER",
   "model": {"type": "src.network.custom.DenseANNFromSparseANN", "kwargs": {"in_features": 12288, "hidden_dim": 512, "num_hidden_layers": 3, "num_classes": 200, "sparsity": 0.995, "act": "relu", "layernorm": true}},
   "dataset": {"type": "dataset.tiny_imagenet.TinyImageNet", "kwargs": {"train_batch": 128, "test_batch": 512, "resize": [64, 64], "flatten": true, "device": "DEVICE_LOCATION"}},
   "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.005, "momentum": 0.0, "weight_decay": 0.0005}},

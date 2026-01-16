@@ -181,7 +181,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         log_entry = training_utilities.generate_log_entry(statistics, children, train_loader, test_loader, device)
         settings.logger.log(log_entry)
 
-    return children[0]
+    return children
 
 def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
@@ -250,7 +250,7 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
         log_entry = training_utilities.generate_log_entry(statistics, children, train_loader, test_loader, device)
         settings.logger.log(log_entry)
 
-    return children[0]
+    return children
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
@@ -296,4 +296,5 @@ if __name__ == "__main__":
     decay = utilities.resolve_class(settings.decay["type"])(**settings.decay["kwargs"])
 
     # instantiate experiment handle and call it
-    mode = globals()[settings.mode["type"]](model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, decay_strategy=decay, **settings.mode["kwargs"])
+    models = globals()[settings.mode["type"]](model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, decay_strategy=decay, **settings.mode["kwargs"])
+    utilities.resolve_class(settings.serialize["type"])(**settings.serialize["kwargs"]).serialize(models) if settings.serialize is not None else None

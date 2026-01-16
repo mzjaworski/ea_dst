@@ -28,6 +28,7 @@ class Settings(metaclass=SingletonMeta):
         self.regrowth = configuration["regrowth"]
         self.decay = configuration["decay"]
         self.mode = configuration["mode"]
+        self.serialize = configuration["serialize"] if "serialize" in configuration else None
 
         self._logger = None
 
