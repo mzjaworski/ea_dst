@@ -21,6 +21,8 @@ import pathlib
 
 import matplotlib.pyplot as plt
 import networkx as nx
+import matplotlib.pyplot as plt
+import os
 
 
 
@@ -132,6 +134,49 @@ def compute_actual_clustering(layers):
         "layer_pairs": pair_layer_clust
     }
 
+def plot_layer_statistics(statistics, against: str = "accuracy", dataset: str = "none") -> None:
+
+    layer_count = len(statistics[0]['layers'])
+    layer_fields = list(statistics[0]['layers'][0].keys())
+    other_fields = [key for key in list(statistics[0].keys()) if key not in ["path", "layers", against, "accuracy"]]
+
+    pathlib.Path(f"data/network_analysis/{dataset}").mkdir(parents=True, exist_ok=True)
+
+    for layer_field in layer_fields:
+        for layer_index in range(layer_count):
+            x = []
+            y = []
+
+            for group in statistics:
+                x.append(group[against])
+                y.append(group['layers'][layer_index][layer_field])
+
+            plt.scatter(x, y)
+            plt.xlabel(against)
+            plt.ylabel(layer_field)
+            plt.title(f"{against}-{layer_field} plot")
+            plt.grid(True)
+
+            plt.savefig(f"data/network_analysis/{dataset}/layer_{layer_index}|{against}_vs_{layer_field}.png", dpi=300, bbox_inches="tight")
+            plt.close()
+
+    for other_field in other_fields:
+        x = []
+        y = []
+
+        for group in statistics:
+            x.append(group[against])
+            y.append(group[other_field])
+
+        plt.scatter(x, y)
+        plt.xlabel(against)
+        plt.ylabel(other_field)
+        plt.title(f"{against}-{other_field} plot")
+        plt.grid(True)
+
+        plt.savefig(f"data/network_analysis/{dataset}/{against}_vs_{other_field}.png", dpi=300, bbox_inches="tight")
+        plt.close()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
 
@@ -174,6 +219,7 @@ if __name__ == "__main__":
 
     statistics = []
     for model_index, model_path in enumerate(pathlib.Path(model_directory).glob('**/*.pt')):
+
         # print(model_index)
         model = model_factory().to(device)
         model.load_state_dict(torch.load(model_path, map_location=device))
@@ -195,35 +241,39 @@ if __name__ == "__main__":
             layers.append(layer)
 
         clustering = compute_eigenvector_centrality(layers)
-        statistics[-1]["layers"] = {"single_layer": clustering["single_layer"][-1], "layer_pairs": clustering["layer_pairs"][-1]}
+        for pair_index, value in enumerate(clustering["single_layer"]):
+            statistics[-1][f"eigenvector_single_{pair_index}"] = value
+        for pair_index, value in enumerate(clustering["layer_pairs"]):
+            statistics[-1][f"eigenvector_pairs_{pair_index}"] = value
 
-        # for layer in layers:
-        #     metrics = {}
-        #
-        #     # compute number of isolated inputs/outputs
-        #     if isinstance(layer.layer, torch.nn.Linear):
-        #
-        #         deg_in = layer.mask.sum(dim=0)
-        #         deg_out = layer.mask.sum(dim=1)
-        #
-        #         metrics["i_in"] = round((deg_in == 0).sum().item() / layer.mask.size(1), 4)
-        #         metrics["i_out"] = round((deg_out == 0).sum().item() / layer.mask.size(0), 4)
-        #         metrics["deg_in_mean"] = round(deg_in[deg_in > 0].float().mean().item(), 4)
-        #         metrics["deg_out_mean"] = round(deg_out[deg_out > 0].float().mean().item(), 4)
-        #
-        #         # metrics["in_overlap"] = (layer.mask @ layer.mask.T > 1).float().mean().item()
-        #         # metrics["out_overlap"] = (layer.mask.T @ layer.mask > 1).float().mean().item()
-        #
-        #         u, s, v = torch.linalg.svd(layer.mask.float(), full_matrices=False)
-        #         metrics["effective_rank"] = round((s.sum() ** 2 / (s ** 2).sum()).item(), 4)
-        #
-        #     else:
-        #         raise RuntimeError("unsupported layer type")
-        #
-        #     statistics[-1]["layers"].append(metrics)
+        for layer in layers:
+            metrics = {}
+
+            # compute number of isolated inputs/outputs
+            if isinstance(layer.layer, torch.nn.Linear):
+
+                deg_in = layer.mask.sum(dim=0)
+                deg_out = layer.mask.sum(dim=1)
+
+                metrics["i_in"] = round((deg_in == 0).sum().item() / layer.mask.size(1), 4)
+                metrics["i_out"] = round((deg_out == 0).sum().item() / layer.mask.size(0), 4)
+                metrics["deg_in_mean"] = round(deg_in[deg_in > 0].float().mean().item(), 4)
+                metrics["deg_out_mean"] = round(deg_out[deg_out > 0].float().mean().item(), 4)
+
+                metrics["in_overlap"] = round((layer.mask @ layer.mask.T > 1).float().mean().item(), 4)
+                metrics["out_overlap"] = round((layer.mask.T @ layer.mask > 1).float().mean().item(), 4)
+
+                u, s, v = torch.linalg.svd(layer.mask.float(), full_matrices=False)
+                metrics["effective_rank"] = round((s.sum() ** 2 / (s ** 2).sum()).item(), 4)
+
+            else:
+                raise RuntimeError("unsupported layer type")
+
+            statistics[-1]["layers"].append(metrics)
         # statistics[-1]["layers"] = statistics[-1]["layers"][-1:]
 
     statistics.sort(key=lambda x: x["accuracy"], reverse=True)
     for entry in statistics:
         print(entry)
-    exit(0)
+
+    plot_layer_statistics(statistics, against="accuracy", dataset=settings.dataset["type"].split(".")[-1].lower())
