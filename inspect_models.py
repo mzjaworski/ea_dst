@@ -26,6 +26,26 @@ import os
 from tqdm import tqdm
 
 from graph_tool.all import *
+import hashlib
+
+def generate_filename(s: str, length: int = 32) -> str:
+    h = hashlib.sha256(s.encode("utf-8")).hexdigest()
+    return h[:length]
+
+# llm generated
+def gini(x: numpy.ndarray) -> float:
+    if x.size == 0:
+        return numpy.nan
+
+    x = numpy.asarray(x, dtype=numpy.float64)
+    if numpy.all(x == 0):
+        return 0.0
+
+    x = numpy.sort(x)
+    n = x.size
+    cumx = numpy.cumsum(x)
+
+    return (n + 1 - 2 * numpy.sum(cumx) / cumx[-1]) / n
 
 # llm generated
 def build_accessor_map(obj, prefix=""):
@@ -56,7 +76,7 @@ def _get_by_path(obj, path):
     return val
 
 def plot_dataset(statistics, folder_name: str = "none") -> None:
-    pathlib.Path(f"data/network_analysis/{folder_name}").mkdir(parents=True, exist_ok=True)
+    pathlib.Path(f"data/network_analysis/plots/{folder_name}").mkdir(parents=True, exist_ok=True)
 
     # gather x axis
     x_field_name = "accuracy"
@@ -74,7 +94,7 @@ def plot_dataset(statistics, folder_name: str = "none") -> None:
         plt.ylabel(y_field_name)
         plt.grid(True)
 
-        plt.savefig(f"data/network_analysis/{folder_name}/{x_field_name}_vs_{y_field_name}.png", dpi=300, bbox_inches="tight")
+        plt.savefig(f"data/network_analysis/plots/{folder_name}/{x_field_name}_vs_{y_field_name}.png", dpi=300, bbox_inches="tight")
         plt.close()
 
 def convert_to_graph(model: torch.nn.Module) -> Tuple[Graph, List[int]]:
@@ -135,6 +155,7 @@ def global_statistics(graph: Graph, vertex_property, layer_sizes: list, connecte
         'mean': float(values.mean()),
         'std': float(values.std()),
         'median': float(numpy.median(values)),
+        'gini': float(gini(values))
     }
 
 def local_statistics(graph: Graph, vertex_property, layer_sizes: list, connected_only: bool = False) -> List[dict]:
@@ -157,6 +178,7 @@ def local_statistics(graph: Graph, vertex_property, layer_sizes: list, connected
             'mean': float(layer_values.mean()),
             'std': float(layer_values.std()),
             'median': float(numpy.median(layer_values)),
+            'gini': float(gini(layer_values))
         })
 
         layer_start += layer_size
@@ -200,51 +222,89 @@ if __name__ == "__main__":
     model_factory = lambda: utilities.resolve_class(settings.model["type"])(**settings.model["kwargs"])
     optimizer_factory = lambda x: utilities.resolve_class(settings.optimizer["type"])(x.parameters(), **settings.optimizer["kwargs"])
     criterion_factory = lambda: utilities.resolve_class(settings.criterion["type"])(**settings.criterion["kwargs"])
-
-    model_directory = "/".join(settings.serialize["kwargs"]["path"].split("/")[:-2])
     device = "cuda:0"
 
+    model_directory = "/".join(settings.serialize["kwargs"]["path"].split("/")[:-2])
+    folder_name = settings.dataset["type"].split(".")[-1].lower()
+
+    dataset_file_name = generate_filename("|".join(str(f) for f in pathlib.Path(model_directory).glob("**/*.pt")))
+    dataset_path = pathlib.Path(f"data/network_analysis/dataset/{folder_name}/{dataset_file_name}.json")
+    pathlib.Path(f"data/network_analysis/dataset/{folder_name}").mkdir(parents=True, exist_ok=True)
+
     dataset = []
-    for model_index, model_path in tqdm(enumerate(pathlib.Path(model_directory).glob('**/*.pt'))):
-        data = {"path": str(model_path)}
+    if dataset_path.exists(): # did we already process this data once?
+        with open(dataset_path) as f:
+            dataset = json.load(f)
+    else: # no we process it for the first time
 
-        if model_index > 1:
-            continue
+        for model_index, model_path in tqdm(enumerate(pathlib.Path(model_directory).glob('**/*.pt'))):
+            data = {"path": str(model_path)}
 
-        # load model
-        model = model_factory().to(device)
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.eval()
+            # load model
+            model = model_factory().to(device)
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            model.eval()
 
-        # get its accuracy
-        for (level, value) in training_utilities.top_k_accuracy(model, test_loader, device, [1]).items():
-            data["accuracy"] = value
+            # get its accuracy
+            for (level, value) in training_utilities.top_k_accuracy(model, test_loader, device, [1]).items():
+                data["accuracy"] = value
 
-        # now covert network to graph representation
-        graph, neuron_counts = convert_to_graph(model)
+            # check if we already converted this network before
+            graph, neuron_counts = convert_to_graph(model)
 
-        # spawn major fields
-        data["metrics"] = {}
-        data["metrics"]["global"] = {}
-        data["metrics"]["local"] = {}
+            # spawn major fields
+            data["metrics"] = {}
+            data["metrics"]["global"] = {}
+            data["metrics"]["local"] = {}
 
-        # not defined for DAG-s
-        # eigenvalue, eigenvector = graph_tool.centrality.eigenvector(graph)
-        # data["metrics"]["global"]['eigenvalue'] = eigenvalue
-        # data["metrics"]["global"]['eigenvector'] = global_statistics(graph, eigenvector)
+            # not defined for DAG-s
+            # eigenvalue, eigenvector = graph_tool.centrality.eigenvector(graph)
+            # data["metrics"]["global"]['eigenvalue'] = eigenvalue
+            # data["metrics"]["global"]['eigenvector'] = global_statistics(graph, eigenvector)
 
-        pagerank = graph_tool.centrality.pagerank(graph)
-        data["metrics"]["global"]['pagerank'] = global_statistics(graph, pagerank, neuron_counts, connected_only=True)
-        data["metrics"]["local"]['pagerank'] = local_statistics(graph, pagerank, neuron_counts, connected_only=True)
+            in_degree = graph.degree_property_map("in")
+            data["metrics"]["global"]['in_degree'] = global_statistics(graph, in_degree, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['in_degree'] = local_statistics(graph, in_degree, neuron_counts, connected_only=True)
 
-        # graph_tool.centrality.pagerank
-        # graph_tool.centrality.betweenness
-        # graph_tool.centrality.closeness
+            out_degree = graph.degree_property_map("out")
+            data["metrics"]["global"]['out_degree'] = global_statistics(graph, out_degree, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['out_degree'] = local_statistics(graph, out_degree, neuron_counts, connected_only=True)
 
-        dataset.append(data)
+            total_degree = graph.degree_property_map("total")
+            data["metrics"]["global"]['total_degree'] = global_statistics(graph, total_degree, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['total_degree'] = local_statistics(graph, total_degree, neuron_counts, connected_only=True)
+
+            pagerank = graph_tool.centrality.pagerank(graph)
+            data["metrics"]["global"]['pagerank'] = global_statistics(graph, pagerank, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['pagerank'] = local_statistics(graph, pagerank, neuron_counts, connected_only=True)
+
+            vertex_betweenness, _ = graph_tool.centrality.betweenness(graph)
+            data["metrics"]["global"]['betweenness'] = global_statistics(graph, vertex_betweenness, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['betweenness'] = local_statistics(graph, vertex_betweenness, neuron_counts, connected_only=True)
+
+            closeness = graph_tool.centrality.closeness(graph)
+            data["metrics"]["global"]['closeness'] = global_statistics(graph, closeness, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['closeness'] = local_statistics(graph, closeness, neuron_counts, connected_only=True)
+
+            katz_centrality = graph_tool.centrality.katz(graph)
+            data["metrics"]["global"]['katz_centrality'] = global_statistics(graph, katz_centrality, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['katz_centrality'] = local_statistics(graph, katz_centrality, neuron_counts, connected_only=True)
+
+            shortest_distance = graph_tool.topology.shortest_distance(graph)
+            data["metrics"]["global"]['shortest_distance'] = global_statistics(graph, shortest_distance, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['shortest_distance'] = local_statistics(graph, shortest_distance, neuron_counts, connected_only=True)
+
+            k_core = graph_tool.topology.kcore_decomposition(graph)
+            data["metrics"]["global"]['k_core'] = global_statistics(graph, k_core, neuron_counts, connected_only=True)
+            data["metrics"]["local"]['k_core'] = local_statistics(graph, k_core, neuron_counts, connected_only=True)
+
+            dataset.append(data)
+
+        with open(dataset_path, "w") as f:
+            json.dump(dataset, f)
 
     dataset.sort(key=lambda x: x["accuracy"], reverse=True)
     for entry in dataset:
         print(entry)
 
-    plot_dataset(dataset, folder_name=settings.dataset["type"].split(".")[-1].lower())
+    plot_dataset(dataset, folder_name=folder_name)
