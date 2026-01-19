@@ -116,27 +116,50 @@ def convert_to_graph(model: torch.nn.Module) -> Tuple[Graph, List[int]]:
 
     return graph, [len(layer) for layer in vertices]
 
-def global_statistics(graph: Graph, vertex_property) -> dict:
-    values = numpy.array([vertex_property[v] for v in graph.vertices()])
+def global_statistics(graph: Graph, vertex_property, layer_sizes: list, connected_only: bool = False) -> dict:
+    layer_start = 0
+
+    values = []
+    for layer_size in layer_sizes:
+        for vertex_index in range(layer_start, layer_start + layer_size):
+            vertex = graph.vertex(vertex_index)
+
+            if connected_only and (vertex.in_degree() == 0 and vertex.out_degree() == 0):
+                continue
+
+            values.append(vertex_property[vertex])
+        layer_start += layer_size
+    values = numpy.array(values)
+
     return {
         'mean': float(values.mean()),
         'std': float(values.std()),
         'median': float(numpy.median(values)),
     }
 
-def local_statistics(graph: Graph, vertex_property, layer_sizes: list) -> List[dict]:
-    values = numpy.array([vertex_property[v] for v in graph.vertices()])
+def local_statistics(graph: Graph, vertex_property, layer_sizes: list, connected_only: bool = False) -> List[dict]:
+    layer_start = 0
     local_stats = []
-    start = 0
 
-    for size in layer_sizes:
-        layer_slice = values[start:start + size]
+    for layer_size in layer_sizes:
+
+        layer_values = []
+        for vertex_index in range(layer_start, layer_start + layer_size):
+            vertex = graph.vertex(vertex_index)
+
+            if connected_only and (vertex.in_degree() == 0 and vertex.out_degree() == 0):
+                continue
+
+            layer_values.append(vertex_property[vertex])
+        layer_values = numpy.array(layer_values)
+
         local_stats.append({
-            'mean': float(layer_slice.mean()),
-            'std': float(layer_slice.std()),
-            'median': float(numpy.median(layer_slice)),
+            'mean': float(layer_values.mean()),
+            'std': float(layer_values.std()),
+            'median': float(numpy.median(layer_values)),
         })
-        start += size
+
+        layer_start += layer_size
 
     return local_stats
 
@@ -211,8 +234,8 @@ if __name__ == "__main__":
         # data["metrics"]["global"]['eigenvector'] = global_statistics(graph, eigenvector)
 
         pagerank = graph_tool.centrality.pagerank(graph)
-        data["metrics"]["global"]['pagerank'] = global_statistics(graph, pagerank)
-        data["metrics"]["local"]['pagerank'] = local_statistics(graph, pagerank, neuron_counts)
+        data["metrics"]["global"]['pagerank'] = global_statistics(graph, pagerank, neuron_counts, connected_only=True)
+        data["metrics"]["local"]['pagerank'] = local_statistics(graph, pagerank, neuron_counts, connected_only=True)
 
         # graph_tool.centrality.pagerank
         # graph_tool.centrality.betweenness
