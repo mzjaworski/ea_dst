@@ -23,159 +23,123 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import matplotlib.pyplot as plt
 import os
+from tqdm import tqdm
 
+from graph_tool.all import *
 
+# llm generated
+def build_accessor_map(obj, prefix=""):
+    fields = {}
 
-def leading_eigenvector_scalar(adj, max_iters=50, tol=1e-6, mode="mean"):
-    """
-    Compute a single summary scalar of leading eigenvector centrality.
-    adj: [n x n] torch tensor, symmetric
-    mode: "mean" or "max"
-    """
-    n = adj.size(0)
-    v = torch.rand(n, device=adj.device)
-    v = v / v.norm()
-
-    for _ in range(max_iters):
-        v_next = adj @ v
-        v_next = v_next / (v_next.norm() + 1e-12)
-        if torch.norm(v_next - v) < tol:
-            break
-        v = v_next
-
-    v = v / v.max()  # normalize 0-1
-
-    if mode == "mean":
-        return v.mean().item()
-    elif mode == "max":
-        return v.max().item()
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            path = f"{prefix}.{k}" if prefix else str(k)
+            fields.update(build_accessor_map(v, path))
+    elif isinstance(obj, list):
+        for idx, v in enumerate(obj):
+            path = f"{prefix}.{idx}" if prefix else str(idx)
+            fields.update(build_accessor_map(v, path))
     else:
-        raise ValueError("mode must be 'mean' or 'max'")
+        fields[prefix] = lambda x, p=prefix: _get_by_path(x, p)
 
-def compute_eigenvector_centrality(layers, mode="mean"):
-    single_layer_centrality = []
-    layer_pair_centrality = []
+    return fields
 
-    for layer in layers:
-        mask = layer.mask.float()
-        adj = (mask @ mask.T)
-        adj = (adj > 0).float()
-        adj.fill_diagonal_(0)
-        single_layer_centrality.append(leading_eigenvector_scalar(adj, mode=mode))
+# llm generated
+def _get_by_path(obj, path):
+    keys = path.split(".")
+    val = obj
+    for key in keys:
+        if key.isdigit():
+            val = val[int(key)]
+        else:
+            val = val[key]
+    return val
 
-    for i in range(len(layers) - 1):
-        mask1 = layers[i].mask.float()
-        mask2 = layers[i+1].mask.float()
-        composite = mask2 @ mask1
-        adj = (composite.T @ composite)
-        adj = (adj > 0).float()
-        adj.fill_diagonal_(0)
-        layer_pair_centrality.append(leading_eigenvector_scalar(adj, mode=mode))
+def plot_dataset(statistics, folder_name: str = "none") -> None:
+    pathlib.Path(f"data/network_analysis/{folder_name}").mkdir(parents=True, exist_ok=True)
 
-    return {
-        "single_layer": single_layer_centrality,  # scalar per layer
-        "layer_pairs": layer_pair_centrality      # scalar per consecutive layer pair
-    }
+    # gather x axis
+    x_field_name = "accuracy"
+    x = [x[x_field_name] for x in statistics]
 
+    # scan for fields
+    accessor_map = build_accessor_map(statistics[0]["metrics"])
 
-
-def compute_actual_clustering(layers):
-    """
-    Compute the actual graph-theory clustering coefficient for each layer
-    and for each pair of consecutive layers.
-
-    Args:
-        layers: list of objects with `.mask` attribute (torch.Tensor, out x in, binary)
-
-    Returns:
-        dict with:
-            "single_layer": list of avg clustering per layer
-            "layer_pairs": list of avg clustering per consecutive layer pair
-    """
-    single_layer_clust = []
-    pair_layer_clust = []
-
-    # --- Single-layer clustering ---
-    for layer in layers:
-        mask = layer.mask.float()  # [out, in]
-        # build output-output adjacency (connect outputs that share inputs)
-        adj = (mask @ mask.T)  # [out, out]
-        adj = (adj > 0).float()
-        adj.fill_diagonal_(0)
-
-        # triangles per node: diag(A^3)/2 for undirected
-        triangles = torch.diagonal(adj @ adj @ adj) / 2
-        deg = adj.sum(dim=1)
-        clustering = torch.zeros_like(deg)
-        mask_deg = deg > 1
-        clustering[mask_deg] = (2 * triangles[mask_deg]) / (deg[mask_deg] * (deg[mask_deg] - 1))
-        single_layer_clust.append(clustering.mean().item())
-
-    # --- Consecutive layer pair clustering ---
-    for i in range(len(layers) - 1):
-        mask1 = layers[i].mask.float()
-        mask2 = layers[i+1].mask.float()
-
-        # build composite adjacency (inputs of layer1 connected if they reach same output in layer2)
-        composite = mask2 @ mask1  # out2 x in1
-        adj = (composite.T @ composite)  # square adjacency over inputs of layer1
-        adj = (adj > 0).float()
-        adj.fill_diagonal_(0)
-
-        triangles = torch.diagonal(adj @ adj @ adj) / 2
-        deg = adj.sum(dim=1)
-        clustering = torch.zeros_like(deg)
-        mask_deg = deg > 1
-        clustering[mask_deg] = (2 * triangles[mask_deg]) / (deg[mask_deg] * (deg[mask_deg] - 1))
-        pair_layer_clust.append(clustering.mean().item())
-
-    return {
-        "single_layer": single_layer_clust,
-        "layer_pairs": pair_layer_clust
-    }
-
-def plot_layer_statistics(statistics, against: str = "accuracy", dataset: str = "none") -> None:
-
-    layer_count = len(statistics[0]['layers'])
-    layer_fields = list(statistics[0]['layers'][0].keys())
-    other_fields = [key for key in list(statistics[0].keys()) if key not in ["path", "layers", against, "accuracy"]]
-
-    pathlib.Path(f"data/network_analysis/{dataset}").mkdir(parents=True, exist_ok=True)
-
-    for layer_field in layer_fields:
-        for layer_index in range(layer_count):
-            x = []
-            y = []
-
-            for group in statistics:
-                x.append(group[against])
-                y.append(group['layers'][layer_index][layer_field])
-
-            plt.scatter(x, y)
-            plt.xlabel(against)
-            plt.ylabel(layer_field)
-            plt.title(f"{against}-{layer_field} plot")
-            plt.grid(True)
-
-            plt.savefig(f"data/network_analysis/{dataset}/layer_{layer_index}|{against}_vs_{layer_field}.png", dpi=300, bbox_inches="tight")
-            plt.close()
-
-    for other_field in other_fields:
-        x = []
-        y = []
-
-        for group in statistics:
-            x.append(group[against])
-            y.append(group[other_field])
+    # plot for all fields treated as y
+    for y_field_name, accessor in accessor_map.items():
+        y = [accessor(x["metrics"]) for x in statistics]
 
         plt.scatter(x, y)
-        plt.xlabel(against)
-        plt.ylabel(other_field)
-        plt.title(f"{against}-{other_field} plot")
+        plt.xlabel(x_field_name)
+        plt.ylabel(y_field_name)
         plt.grid(True)
 
-        plt.savefig(f"data/network_analysis/{dataset}/{against}_vs_{other_field}.png", dpi=300, bbox_inches="tight")
+        plt.savefig(f"data/network_analysis/{folder_name}/{x_field_name}_vs_{y_field_name}.png", dpi=300, bbox_inches="tight")
         plt.close()
+
+def convert_to_graph(model: torch.nn.Module) -> Tuple[Graph, List[int]]:
+
+    # collect only custom layers
+    layers = []
+    for layer in model.modules():
+        if not isinstance(layer, src.network.detail.MaskedLayer):
+            continue
+        if not isinstance(layer.layer, torch.nn.Linear):
+            raise RuntimeError("currently only linear layers are supported!")
+        layers.append(layer)
+
+    if not layers:
+        raise RuntimeError("No masked layers found!")
+
+    # create graph
+    graph = Graph(directed=True)
+    vertices = []
+
+    # create vertices for input layer
+    input_vertices = [graph.add_vertex() for _ in range(layers[0].mask.shape[1])]
+    vertices.append(input_vertices)
+
+    # now create vertices for every layer output
+    for layer in layers:
+        layer_vertices = [graph.add_vertex() for _ in range(layer.mask.shape[0])]
+        vertices.append(layer_vertices)
+
+    # add edges according to each layers mask
+    for layer_index, layer in enumerate(layers):
+        mask = layer.mask
+        out_dim, in_dim = mask.shape
+
+        for i in range(out_dim):
+            for j in range(in_dim):
+                if mask[i, j]:
+                    graph.add_edge(vertices[layer_index][j], vertices[layer_index + 1][i])
+
+    return graph, [len(layer) for layer in vertices]
+
+def global_statistics(graph: Graph, vertex_property) -> dict:
+    values = numpy.array([vertex_property[v] for v in graph.vertices()])
+    return {
+        'mean': float(values.mean()),
+        'std': float(values.std()),
+        'median': float(numpy.median(values)),
+    }
+
+def local_statistics(graph: Graph, vertex_property, layer_sizes: list) -> List[dict]:
+    values = numpy.array([vertex_property[v] for v in graph.vertices()])
+    local_stats = []
+    start = 0
+
+    for size in layer_sizes:
+        layer_slice = values[start:start + size]
+        local_stats.append({
+            'mean': float(layer_slice.mean()),
+            'std': float(layer_slice.std()),
+            'median': float(numpy.median(layer_slice)),
+        })
+        start += size
+
+    return local_stats
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
@@ -217,63 +181,47 @@ if __name__ == "__main__":
     model_directory = "/".join(settings.serialize["kwargs"]["path"].split("/")[:-2])
     device = "cuda:0"
 
-    statistics = []
-    for model_index, model_path in enumerate(pathlib.Path(model_directory).glob('**/*.pt')):
+    dataset = []
+    for model_index, model_path in tqdm(enumerate(pathlib.Path(model_directory).glob('**/*.pt'))):
+        data = {"path": str(model_path)}
 
-        # print(model_index)
+        if model_index > 1:
+            continue
+
+        # load model
         model = model_factory().to(device)
         model.load_state_dict(torch.load(model_path, map_location=device))
         model.eval()
 
-        statistics.append({"path": str(model_path)})
-
-        statistics[-1]["accuracy"] = {}
+        # get its accuracy
         for (level, value) in training_utilities.top_k_accuracy(model, test_loader, device, [1]).items():
-            statistics[-1]["accuracy"] = value
+            data["accuracy"] = value
 
-        statistics[-1]["layers"] = []
+        # now covert network to graph representation
+        graph, neuron_counts = convert_to_graph(model)
 
-        layers = []
-        for layer in model.modules():
-            # we are interested only in custom MaskedLayers
-            if not isinstance(layer, src.network.detail.MaskedLayer):
-                continue
-            layers.append(layer)
+        # spawn major fields
+        data["metrics"] = {}
+        data["metrics"]["global"] = {}
+        data["metrics"]["local"] = {}
 
-        clustering = compute_eigenvector_centrality(layers)
-        for pair_index, value in enumerate(clustering["single_layer"]):
-            statistics[-1][f"eigenvector_single_{pair_index}"] = value
-        for pair_index, value in enumerate(clustering["layer_pairs"]):
-            statistics[-1][f"eigenvector_pairs_{pair_index}"] = value
+        # not defined for DAG-s
+        # eigenvalue, eigenvector = graph_tool.centrality.eigenvector(graph)
+        # data["metrics"]["global"]['eigenvalue'] = eigenvalue
+        # data["metrics"]["global"]['eigenvector'] = global_statistics(graph, eigenvector)
 
-        for layer in layers:
-            metrics = {}
+        pagerank = graph_tool.centrality.pagerank(graph)
+        data["metrics"]["global"]['pagerank'] = global_statistics(graph, pagerank)
+        data["metrics"]["local"]['pagerank'] = local_statistics(graph, pagerank, neuron_counts)
 
-            # compute number of isolated inputs/outputs
-            if isinstance(layer.layer, torch.nn.Linear):
+        # graph_tool.centrality.pagerank
+        # graph_tool.centrality.betweenness
+        # graph_tool.centrality.closeness
 
-                deg_in = layer.mask.sum(dim=0)
-                deg_out = layer.mask.sum(dim=1)
+        dataset.append(data)
 
-                metrics["i_in"] = round((deg_in == 0).sum().item() / layer.mask.size(1), 4)
-                metrics["i_out"] = round((deg_out == 0).sum().item() / layer.mask.size(0), 4)
-                metrics["deg_in_mean"] = round(deg_in[deg_in > 0].float().mean().item(), 4)
-                metrics["deg_out_mean"] = round(deg_out[deg_out > 0].float().mean().item(), 4)
-
-                metrics["in_overlap"] = round((layer.mask @ layer.mask.T > 1).float().mean().item(), 4)
-                metrics["out_overlap"] = round((layer.mask.T @ layer.mask > 1).float().mean().item(), 4)
-
-                u, s, v = torch.linalg.svd(layer.mask.float(), full_matrices=False)
-                metrics["effective_rank"] = round((s.sum() ** 2 / (s ** 2).sum()).item(), 4)
-
-            else:
-                raise RuntimeError("unsupported layer type")
-
-            statistics[-1]["layers"].append(metrics)
-        # statistics[-1]["layers"] = statistics[-1]["layers"][-1:]
-
-    statistics.sort(key=lambda x: x["accuracy"], reverse=True)
-    for entry in statistics:
+    dataset.sort(key=lambda x: x["accuracy"], reverse=True)
+    for entry in dataset:
         print(entry)
 
-    plot_layer_statistics(statistics, against="accuracy", dataset=settings.dataset["type"].split(".")[-1].lower())
+    plot_dataset(dataset, folder_name=settings.dataset["type"].split(".")[-1].lower())
