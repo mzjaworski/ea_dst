@@ -27,6 +27,8 @@ from tqdm import tqdm
 
 from graph_tool.all import *
 import hashlib
+import scipy
+from statsmodels.stats.multitest import multipletests
 
 def generate_filename(s: str, length: int = 32) -> str:
     h = hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -75,7 +77,7 @@ def _get_by_path(obj, path):
             val = val[key]
     return val
 
-def plot_dataset(statistics, folder_name: str = "none") -> None:
+def plot_dataset(statistics: List[dict], folder_name: str = "none") -> None:
     pathlib.Path(f"data/network_analysis/plots/{folder_name}").mkdir(parents=True, exist_ok=True)
 
     # gather x axis
@@ -96,6 +98,36 @@ def plot_dataset(statistics, folder_name: str = "none") -> None:
 
         plt.savefig(f"data/network_analysis/plots/{folder_name}/{x_field_name}_vs_{y_field_name}.png", dpi=300, bbox_inches="tight")
         plt.close()
+
+def measure_correlation(statistics: List[dict], folder_name: str = "none") -> None:
+
+    # gather x axis
+    x_field_name = "accuracy"
+    x = [x[x_field_name] for x in statistics]
+
+    # scan for fields
+    accessor_map = build_accessor_map(statistics[0]["metrics"])
+
+    print(f"------------------------------- {folder_name} -------------------------------")
+
+    field_names = []
+    p_values = []
+
+    for y_field_name, accessor in accessor_map.items():
+        if ".4." in y_field_name:
+            y = [accessor(x["metrics"]) for x in statistics]
+            result = scipy.stats.spearmanr(y, x)
+
+            if numpy.isfinite(result.pvalue):
+                field_names.append(y_field_name)
+                p_values.append(float(result.pvalue))
+
+    reject, p_adj, _, _ = multipletests(p_values, alpha=0.05, method="fdr_bh")
+
+    for (field_name, rejected, p_value) in zip(field_names, reject, p_adj):
+        if rejected:
+            print(f"{field_name}: {p_value}")
+
 
 def convert_to_graph(model: torch.nn.Module) -> Tuple[Graph, List[int]]:
 
@@ -304,7 +336,8 @@ if __name__ == "__main__":
             json.dump(dataset, f)
 
     dataset.sort(key=lambda x: x["accuracy"], reverse=True)
-    for entry in dataset:
-        print(entry)
+    # for entry in dataset:
+    #     print(entry)
 
-    plot_dataset(dataset, folder_name=folder_name)
+    # plot_dataset(dataset, folder_name=folder_name)
+    measure_correlation(dataset, folder_name=folder_name)
