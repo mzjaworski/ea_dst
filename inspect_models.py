@@ -29,10 +29,33 @@ from graph_tool.all import *
 import hashlib
 import scipy
 from statsmodels.stats.multitest import multipletests
+import pickle
 
 def generate_filename(s: str, length: int = 32) -> str:
     h = hashlib.sha256(s.encode("utf-8")).hexdigest()
     return h[:length]
+
+def load_or_convert(model: torch.nn.Module, folder_name: str, model_path: str):
+    base_dir = pathlib.Path(f"data/network_analysis/network/{folder_name}")
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = generate_filename(str(model_path))
+    graph_path = base_dir / f"{stem}.xml.gz"
+    meta_path  = base_dir / f"{stem}_meta.pkl"
+
+    if graph_path.exists() and meta_path.exists():
+        graph = load_graph(str(graph_path))
+        with open(meta_path, "rb") as f:
+            meta = pickle.load(f)
+        return graph, meta
+
+    graph, meta = convert_to_graph(model)
+
+    graph.save(str(graph_path))
+    with open(meta_path, "wb") as f:
+        pickle.dump(meta, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return graph, meta
 
 # llm generated
 def gini(x: numpy.ndarray) -> float:
@@ -111,22 +134,26 @@ def measure_correlation(statistics: List[dict], folder_name: str = "none") -> No
     print(f"------------------------------- {folder_name} -------------------------------")
 
     field_names = []
+    correlations = []
     p_values = []
 
     for y_field_name, accessor in accessor_map.items():
-        if ".4." in y_field_name:
-            y = [accessor(x["metrics"]) for x in statistics]
-            result = scipy.stats.spearmanr(y, x)
+        y = [accessor(x["metrics"]) for x in statistics]
+        result = scipy.stats.spearmanr(y, x)
 
-            if numpy.isfinite(result.pvalue):
-                field_names.append(y_field_name)
-                p_values.append(float(result.pvalue))
+        if numpy.isfinite(result.pvalue):
+            field_names.append(y_field_name)
+            correlations.append(result.correlation)
+            p_values.append(float(result.pvalue))
+
+    # for (field_name, correlation, p_value) in zip(field_names, correlations, p_values):
+    #     print(f"{field_name}: {p_value} {correlation}")
 
     reject, p_adj, _, _ = multipletests(p_values, alpha=0.05, method="fdr_bh")
 
-    for (field_name, rejected, p_value) in zip(field_names, reject, p_adj):
+    for (field_name, correlation, rejected, p_value) in zip(field_names, correlations, reject, p_adj):
         if rejected:
-            print(f"{field_name}: {p_value}")
+            print(f"{field_name}: {p_value} {correlation}")
 
 
 def convert_to_graph(model: torch.nn.Module) -> Tuple[Graph, List[int]]:
@@ -259,13 +286,13 @@ if __name__ == "__main__":
     model_directory = "/".join(settings.serialize["kwargs"]["path"].split("/")[:-2])
     folder_name = settings.dataset["type"].split(".")[-1].lower()
 
-    dataset_file_name = generate_filename("|".join(str(f) for f in pathlib.Path(model_directory).glob("**/*.pt")))
-    dataset_path = pathlib.Path(f"data/network_analysis/dataset/{folder_name}/{dataset_file_name}.json")
-    pathlib.Path(f"data/network_analysis/dataset/{folder_name}").mkdir(parents=True, exist_ok=True)
+    statistics_file_name = generate_filename("|".join(str(f) for f in pathlib.Path(model_directory).glob("**/*.pt")))
+    statistics_path = pathlib.Path(f"data/network_analysis/statistics/{folder_name}/{statistics_file_name}.json")
+    pathlib.Path(f"data/network_analysis/statistics/{folder_name}").mkdir(parents=True, exist_ok=True)
 
     dataset = []
-    if dataset_path.exists(): # did we already process this data once?
-        with open(dataset_path) as f:
+    if statistics_path.exists(): # did we already process this data once?
+        with open(statistics_path) as f:
             dataset = json.load(f)
     else: # no we process it for the first time
 
@@ -282,7 +309,7 @@ if __name__ == "__main__":
                 data["accuracy"] = value
 
             # check if we already converted this network before
-            graph, neuron_counts = convert_to_graph(model)
+            graph, neuron_counts = load_or_convert(model, folder_name, model_path)
 
             # spawn major fields
             data["metrics"] = {}
@@ -332,12 +359,12 @@ if __name__ == "__main__":
 
             dataset.append(data)
 
-        with open(dataset_path, "w") as f:
+        with open(statistics_path, "w") as f:
             json.dump(dataset, f)
 
     dataset.sort(key=lambda x: x["accuracy"], reverse=True)
-    # for entry in dataset:
-    #     print(entry)
+    for entry in dataset:
+        print(entry)
 
-    # plot_dataset(dataset, folder_name=folder_name)
+    plot_dataset(dataset, folder_name=folder_name)
     measure_correlation(dataset, folder_name=folder_name)
