@@ -100,24 +100,25 @@ def _get_by_path(obj, path):
             val = val[key]
     return val
 
-def plot_dataset(statistics: List[dict], folder_name: str = "none") -> None:
+def plot_dataset(statistics: List[List[dict]], folder_name: str = "none") -> None:
     pathlib.Path(f"data/network_analysis/plots/{folder_name}").mkdir(parents=True, exist_ok=True)
-
-    # gather x axis
     x_field_name = "accuracy"
-    x = [x[x_field_name] for x in statistics]
 
     # scan for fields
-    accessor_map = build_accessor_map(statistics[0]["metrics"])
+    accessor_map = build_accessor_map(statistics[0][0]["metrics"])
 
     # plot for all fields treated as y
+    cmap = plt.get_cmap("tab10")
     for y_field_name, accessor in accessor_map.items():
-        y = [accessor(x["metrics"]) for x in statistics]
+        for i, dataset in enumerate(statistics):
+            x = [x[x_field_name] for x in dataset]
+            y = [accessor(x["metrics"]) for x in dataset]
+            plt.scatter(x, y, color=cmap(i), label=f"dataset_{i}")
 
-        plt.scatter(x, y)
         plt.xlabel(x_field_name)
         plt.ylabel(y_field_name)
         plt.grid(True)
+        plt.legend()
 
         plt.savefig(f"data/network_analysis/plots/{folder_name}/{x_field_name}_vs_{y_field_name}.png", dpi=300, bbox_inches="tight")
         plt.close()
@@ -272,99 +273,109 @@ if __name__ == "__main__":
             configuration += line
         args.configuration = json.loads(configuration)
 
-    # spawn global settings object
-    settings = settings.Settings(args.configuration)
+    if not isinstance(args.configuration, list):
+        args.configuration = [args.configuration]
 
-    # instantiate referenced objects
-    train_loader, test_loader = utilities.resolve_class(settings.dataset["type"])(**settings.dataset["kwargs"]).load()
+    all_statistics = []
+    for configuration in args.configuration:
 
-    model_factory = lambda: utilities.resolve_class(settings.model["type"])(**settings.model["kwargs"])
-    optimizer_factory = lambda x: utilities.resolve_class(settings.optimizer["type"])(x.parameters(), **settings.optimizer["kwargs"])
-    criterion_factory = lambda: utilities.resolve_class(settings.criterion["type"])(**settings.criterion["kwargs"])
-    device = "cuda:0"
+        # spawn global settings object
+        config = settings.Settings(configuration)
 
-    model_directory = "/".join(settings.serialize["kwargs"]["path"].split("/")[:-2])
-    folder_name = settings.dataset["type"].split(".")[-1].lower()
+        # instantiate referenced objects
+        train_loader, test_loader = utilities.resolve_class(config.dataset["type"])(**config.dataset["kwargs"]).load()
 
-    statistics_file_name = generate_filename("|".join(str(f) for f in pathlib.Path(model_directory).glob("**/*.pt")))
-    statistics_path = pathlib.Path(f"data/network_analysis/statistics/{folder_name}/{statistics_file_name}.json")
-    pathlib.Path(f"data/network_analysis/statistics/{folder_name}").mkdir(parents=True, exist_ok=True)
+        model_factory = lambda: utilities.resolve_class(config.model["type"])(**config.model["kwargs"])
+        optimizer_factory = lambda x: utilities.resolve_class(config.optimizer["type"])(x.parameters(), **config.optimizer["kwargs"])
+        criterion_factory = lambda: utilities.resolve_class(config.criterion["type"])(**config.criterion["kwargs"])
+        device = "cuda:0"
 
-    dataset = []
-    if statistics_path.exists(): # did we already process this data once?
-        with open(statistics_path) as f:
-            dataset = json.load(f)
-    else: # no we process it for the first time
+        model_directory = "/".join(config.serialize["kwargs"]["path"].split("/")[:-2])
+        folder_name = config.dataset["type"].split(".")[-1].lower()
 
-        for model_index, model_path in tqdm(enumerate(pathlib.Path(model_directory).glob('**/*.pt'))):
-            data = {"path": str(model_path)}
+        statistics_file_name = generate_filename("|".join(str(f) for f in pathlib.Path(model_directory).glob("**/*.pt")))
+        statistics_path = pathlib.Path(f"data/network_analysis/statistics/{folder_name}/{statistics_file_name}.json")
+        pathlib.Path(f"data/network_analysis/statistics/{folder_name}").mkdir(parents=True, exist_ok=True)
 
-            # load model
-            model = model_factory().to(device)
-            model.load_state_dict(torch.load(model_path, map_location=device))
-            model.eval()
+        dataset = []
+        if statistics_path.exists(): # did we already process this data once?
+            with open(statistics_path) as f:
+                dataset = json.load(f)
+        else: # no we process it for the first time
 
-            # get its accuracy
-            for (level, value) in training_utilities.top_k_accuracy(model, test_loader, device, [1]).items():
-                data["accuracy"] = value
+            for model_index, model_path in tqdm(enumerate(pathlib.Path(model_directory).glob('**/*.pt'))):
+                data = {"path": str(model_path)}
 
-            # check if we already converted this network before
-            graph, neuron_counts = load_or_convert(model, folder_name, model_path)
+                # load model
+                model = model_factory().to(device)
+                model.load_state_dict(torch.load(model_path, map_location=device))
+                model.eval()
 
-            # spawn major fields
-            data["metrics"] = {}
-            data["metrics"]["global"] = {}
-            data["metrics"]["local"] = {}
+                # get its accuracy
+                for (level, value) in training_utilities.top_k_accuracy(model, test_loader, device, [1]).items():
+                    data["accuracy"] = value
 
-            # not defined for DAG-s
-            # eigenvalue, eigenvector = graph_tool.centrality.eigenvector(graph)
-            # data["metrics"]["global"]['eigenvalue'] = eigenvalue
-            # data["metrics"]["global"]['eigenvector'] = global_statistics(graph, eigenvector)
+                # check if we already converted this network before
+                graph, neuron_counts = load_or_convert(model, folder_name, model_path)
 
-            in_degree = graph.degree_property_map("in")
-            data["metrics"]["global"]['in_degree'] = global_statistics(graph, in_degree, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['in_degree'] = local_statistics(graph, in_degree, neuron_counts, connected_only=True)
+                # spawn major fields
+                data["metrics"] = {}
+                data["metrics"]["global"] = {}
+                data["metrics"]["local"] = {}
 
-            out_degree = graph.degree_property_map("out")
-            data["metrics"]["global"]['out_degree'] = global_statistics(graph, out_degree, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['out_degree'] = local_statistics(graph, out_degree, neuron_counts, connected_only=True)
+                # not defined for DAG-s
+                # eigenvalue, eigenvector = graph_tool.centrality.eigenvector(graph)
+                # data["metrics"]["global"]['eigenvalue'] = eigenvalue
+                # data["metrics"]["global"]['eigenvector'] = global_statistics(graph, eigenvector)
 
-            total_degree = graph.degree_property_map("total")
-            data["metrics"]["global"]['total_degree'] = global_statistics(graph, total_degree, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['total_degree'] = local_statistics(graph, total_degree, neuron_counts, connected_only=True)
+                in_degree = graph.degree_property_map("in")
+                data["metrics"]["global"]['in_degree'] = global_statistics(graph, in_degree, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['in_degree'] = local_statistics(graph, in_degree, neuron_counts, connected_only=True)
 
-            pagerank = graph_tool.centrality.pagerank(graph)
-            data["metrics"]["global"]['pagerank'] = global_statistics(graph, pagerank, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['pagerank'] = local_statistics(graph, pagerank, neuron_counts, connected_only=True)
+                out_degree = graph.degree_property_map("out")
+                data["metrics"]["global"]['out_degree'] = global_statistics(graph, out_degree, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['out_degree'] = local_statistics(graph, out_degree, neuron_counts, connected_only=True)
 
-            vertex_betweenness, _ = graph_tool.centrality.betweenness(graph)
-            data["metrics"]["global"]['betweenness'] = global_statistics(graph, vertex_betweenness, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['betweenness'] = local_statistics(graph, vertex_betweenness, neuron_counts, connected_only=True)
+                total_degree = graph.degree_property_map("total")
+                data["metrics"]["global"]['total_degree'] = global_statistics(graph, total_degree, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['total_degree'] = local_statistics(graph, total_degree, neuron_counts, connected_only=True)
 
-            closeness = graph_tool.centrality.closeness(graph)
-            data["metrics"]["global"]['closeness'] = global_statistics(graph, closeness, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['closeness'] = local_statistics(graph, closeness, neuron_counts, connected_only=True)
+                pagerank = graph_tool.centrality.pagerank(graph)
+                data["metrics"]["global"]['pagerank'] = global_statistics(graph, pagerank, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['pagerank'] = local_statistics(graph, pagerank, neuron_counts, connected_only=True)
 
-            katz_centrality = graph_tool.centrality.katz(graph)
-            data["metrics"]["global"]['katz_centrality'] = global_statistics(graph, katz_centrality, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['katz_centrality'] = local_statistics(graph, katz_centrality, neuron_counts, connected_only=True)
+                vertex_betweenness, _ = graph_tool.centrality.betweenness(graph)
+                data["metrics"]["global"]['betweenness'] = global_statistics(graph, vertex_betweenness, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['betweenness'] = local_statistics(graph, vertex_betweenness, neuron_counts, connected_only=True)
 
-            shortest_distance = graph_tool.topology.shortest_distance(graph)
-            data["metrics"]["global"]['shortest_distance'] = global_statistics(graph, shortest_distance, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['shortest_distance'] = local_statistics(graph, shortest_distance, neuron_counts, connected_only=True)
+                closeness = graph_tool.centrality.closeness(graph)
+                data["metrics"]["global"]['closeness'] = global_statistics(graph, closeness, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['closeness'] = local_statistics(graph, closeness, neuron_counts, connected_only=True)
 
-            k_core = graph_tool.topology.kcore_decomposition(graph)
-            data["metrics"]["global"]['k_core'] = global_statistics(graph, k_core, neuron_counts, connected_only=True)
-            data["metrics"]["local"]['k_core'] = local_statistics(graph, k_core, neuron_counts, connected_only=True)
+                katz_centrality = graph_tool.centrality.katz(graph)
+                data["metrics"]["global"]['katz_centrality'] = global_statistics(graph, katz_centrality, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['katz_centrality'] = local_statistics(graph, katz_centrality, neuron_counts, connected_only=True)
 
-            dataset.append(data)
+                shortest_distance = graph_tool.topology.shortest_distance(graph)
+                data["metrics"]["global"]['shortest_distance'] = global_statistics(graph, shortest_distance, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['shortest_distance'] = local_statistics(graph, shortest_distance, neuron_counts, connected_only=True)
 
-        with open(statistics_path, "w") as f:
-            json.dump(dataset, f)
+                k_core = graph_tool.topology.kcore_decomposition(graph)
+                data["metrics"]["global"]['k_core'] = global_statistics(graph, k_core, neuron_counts, connected_only=True)
+                data["metrics"]["local"]['k_core'] = local_statistics(graph, k_core, neuron_counts, connected_only=True)
 
-    dataset.sort(key=lambda x: x["accuracy"], reverse=True)
-    for entry in dataset:
-        print(entry)
+                dataset.append(data)
 
-    plot_dataset(dataset, folder_name=folder_name)
-    measure_correlation(dataset, folder_name=folder_name)
+            with open(statistics_path, "w") as f:
+                json.dump(dataset, f)
+
+        dataset.sort(key=lambda x: x["accuracy"], reverse=True)
+        for entry in dataset:
+            print(entry)
+
+        all_statistics.append(dataset)
+        settings.SingletonMeta._instances.pop(settings.Settings, None)
+
+    if len(all_statistics):
+        plot_dataset(all_statistics, folder_name=folder_name)
+        #measure_correlation(dataset, folder_name=folder_name)

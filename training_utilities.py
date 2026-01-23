@@ -33,20 +33,22 @@ def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoad
     return {f"acc-top_{k}": 100.0 * correct[k] / total for k in top_k}
 
 # updates network topology according to predefined set of rules
-def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, prunning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth) -> torch.nn.Module:
+def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth]) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
 
     # iterate over all layers
-    for layer in model.modules():
-        # we are interested only in custom MaskedLayers
-        if not isinstance(layer, src.network.detail.MaskedLayer):
-            continue
+    if pruning_strategies is not None and regrowth_strategies is not None:
+        for layer in model.modules():
+            # we are interested only in custom MaskedLayers
+            if not isinstance(layer, src.network.detail.MaskedLayer):
+                continue
 
-        # apply removal/regrowth only for layers that actually require it
-        if layer.expected_sparsity() > 0.0:
-            pruned_count, pruned_layer = prunning_strategy.apply(layer)
-            regrowth_strategy.apply(pruned_count, pruned_layer)
-            # not assigning back should be safe as we deal with references
+            # apply removal/regrowth only for layers that actually require it
+            if layer.expected_sparsity() > 0.0:
+                for (prunning_strategy, regrowth_strategy) in zip(pruning_strategies, regrowth_strategies):
+                    pruned_count, pruned_layer = prunning_strategy.apply(layer)
+                    regrowth_strategy.apply(pruned_count, pruned_layer)
+                    # not assigning back should be safe as we deal with references
 
     return model
 
@@ -72,14 +74,14 @@ def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
     return model
 
 # instantiates network with all statistics to track
-def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device) -> torch.nn.Module:
+def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device) -> torch.nn.Module:
     model = model_factory().to(device)
 
     if parent is not None:
         model.load_state_dict(parent.state_dict())
 
-    model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
-    model.pruned_fraction = pruning_strategy.pruned_fraction()
+    model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
+    model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
     model = reset_tracked_fields(model)
 
     # fields required to estimate (amortized) FLOPs of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
