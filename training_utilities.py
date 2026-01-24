@@ -50,6 +50,8 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                     regrowth_strategy.apply(pruned_count, pruned_layer)
                     # not assigning back should be safe as we deal with references
 
+            layer.reset_flow() # after we are done with all the prunning time to reset the flow
+
     return model
 
 # some statistics have to be tracked globally
@@ -66,6 +68,7 @@ def initialize_statistics() -> Dict:
     }
 
 def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
+    model.composite_loss = []
     model.median_loss = []
     model.mean_loss = []
     model.std_loss = []
@@ -119,13 +122,60 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
             h.remove()
 
         # get loss
-        loss = criterion(outputs, targets)
+        loss = criterion(outputs, targets) # get loss
+        model.optimizer.zero_grad() # zero gradients
+        loss.mean().backward(retain_graph=True) # compute gradients but DO NOT DROP computational graph
 
-        model.optimizer.zero_grad()
-        loss.mean().backward()
+        for layer in model.modules():
+            if isinstance(layer, src.network.detail.MaskedLayer):
+                print(f"pure_loss: {layer.layer.weight.grad * layer.mask}")
+                break
+
+        model.reset_flow() # set flow to zero
+        model.accumulate_flow() # update flow using gradients
+        model.optimizer.zero_grad() # zero gradients
+
+        loss_flow = 0.0
+        layer_count = 0
+        for layer in model.modules():
+            if not isinstance(layer, src.network.detail.MaskedLayer):
+                continue
+
+            flow = layer.flow
+            mask = layer.mask
+
+            # ignore inactive edges
+            flow_active = flow * mask
+
+            if flow.dim() == 2:  # Linear [out, in]
+                row_sum = flow_active.sum(dim=1, keepdim=True) + 1e-12
+                p = flow_active / row_sum
+            elif flow.dim() == 4:  # Conv2d [out, in, kH, kW]
+                row_sum = flow_active.sum(dim=(1, 2, 3), keepdim=True) + 1e-12
+                p = flow_active / row_sum
+            else:
+                continue
+
+            loss_flow += (p ** 2 * mask).sum() / (mask.sum() + 1e-12)
+            layer_count += 1
+
+        loss_flow /= layer_count
+        print(loss_flow)
+
+        alpha = 1.0
+        flow_contribution = (loss.mean().detach() / (loss_flow.detach() + 1e-12))
+        task_loss = ((1.0 - alpha) * loss.mean()) + (alpha * flow_contribution * loss_flow)
+
+        task_loss.backward()
+
+        for layer in model.modules():
+            if isinstance(layer, src.network.detail.MaskedLayer):
+                print(f"task_loss: {layer.layer.weight.grad * layer.mask}")
+                break
 
         # store stats
         with torch.no_grad():
+            model.composite_loss.append(task_loss.item())
             model.median_loss.append(loss.quantile(q=0.5).item())
             model.mean_loss.append(loss.mean().item())
             model.std_loss.append(loss.std().item())
