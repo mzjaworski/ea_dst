@@ -107,10 +107,13 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
     for model in models:
         statistics["total_batches"] += 1
 
+        normalized_activations = []
         scores = []
         def compute_dormancy_score(module: torch.nn.Module, input: torch.Tensor, output: torch.Tensor) -> None:
-            nonlocal scores
-            scores.append(module.dormancy_score(output))
+            nonlocal normalized_activations, scores
+            normalized_activation, score = module.dormancy_score(output)
+            normalized_activations.append(normalized_activation / normalized_activation.sum())
+            scores.append(score)
 
         # compute forward with neuron dormancy
         handles = [m.register_forward_hook(compute_dormancy_score) for m in model.modules() if isinstance(m, src.network.detail.ActivationFunctionWrapper)]
@@ -131,40 +134,22 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
         loss_flow = 0.0
         layer_count = 0
 
-        for layer in model.modules():
-            if not isinstance(layer, src.network.detail.MaskedLayer):
-                continue
+        for layer_activation in normalized_activations:
+            p = layer_activation.clamp_min(1e-12)
 
-            activation = layer._activation.detach().abs()
-            weight = layer.layer.weight.abs()
-            mask = layer.mask.bool()
-
-            # assert torch.isfinite(activation).all()
-            # assert torch.isfinite(weight).all()
-            # assert torch.isfinite(mask).all()
-
-            if isinstance(layer.layer, torch.nn.Linear):
-                activation = activation.mean(dim=0, keepdim=True)
-            elif isinstance(layer.layer, torch.nn.Conv2d):
-                activation = activation.mean(dim=(0, 2, 3), keepdim=True)
-            else:
-                raise RuntimeError("cannot estimate flow - unsupported layer type!")
-
-            flow = (weight * activation)[mask] + 1e-12
-            flow = flow / flow.sum()
-
-            entropy = -(flow * flow.log()).sum()
-            entropy /= torch.log(torch.tensor(float(flow.numel()), device=flow.device))
+            entropy = -(p * p.log()).sum()
+            entropy /= torch.log(torch.tensor(float(p.numel()), device=p.device))
 
             loss_flow += entropy
             layer_count += 1
 
-            if log:
-                print(entropy)
+            # if log:
+            #     print(entropy)
 
+        # Average over all layers
         loss_flow /= max(layer_count, 1)
 
-        alpha = 0.0
+        alpha = 0.25
         task_loss = loss.mean() * (1 - alpha * loss_flow)
 
         model.optimizer.zero_grad() # zero gradients

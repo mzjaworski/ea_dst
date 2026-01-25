@@ -27,6 +27,7 @@ class SparseANN(src.network.detail.NetworkInterface):
 
         # output layer
         layers.append(src.network.detail.MaskedLayer(torch.nn.Linear(hidden_dim, num_classes), sparsity))
+        layers.append(src.network.detail.ActivationFunctionWrapper(torch.nn.Identity()))
 
         self.model = torch.nn.Sequential(*layers)
 
@@ -61,6 +62,7 @@ class DenseANNFromSparseANN(src.network.detail.NetworkInterface):
 
         # output layer
         layers.append(src.network.detail.MaskedLayer(torch.nn.Linear(neuron_count, num_classes), 0.0))
+        layers.append(src.network.detail.ActivationFunctionWrapper(torch.nn.Identity()))
 
         self.model = torch.nn.Sequential(*layers)
 

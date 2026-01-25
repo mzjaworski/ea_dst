@@ -95,16 +95,16 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: floa
         c.rank = float(numpy.mean(alpha * level + (1.0 - alpha) * slope))
 
     return candidates
-#
-# # rank based ordering
+
+# rank based ordering
 # def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
 #
-#     if len(candidates) < 2 or len(candidates[0].mean_loss) < 2:
+#     if len(candidates) < 2 or len(candidates[0].composite_loss) < 2:
 #         for c in candidates:
 #             c.rank = 0.0
 #         return candidates
 #
-#     mean_loss = numpy.array([c.mean_loss for c in candidates])
+#     mean_loss = numpy.array([c.composite_loss for c in candidates])
 #     diff_loss = numpy.diff(mean_loss, axis=1)
 #
 #     # align loss with change
@@ -309,4 +309,4 @@ if __name__ == "__main__":
 
     # instantiate experiment handle and call it
     models = globals()[settings.mode["type"]](model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategies=pruning, regrowth_strategies=regrowth, decay_strategy=decay, **settings.mode["kwargs"])
-    utilities.resolve_class(settings.serialize["type"])(**settings.serialize["kwargs"]).serialize(models) if settings.serialize is not None else None
+    utilities.resolve_class(settings.serialize["type"])(**settings.serialize["kwargs"]).serialize([models[0]]) if settings.serialize is not None else None
