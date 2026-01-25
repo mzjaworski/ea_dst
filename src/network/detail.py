@@ -50,11 +50,10 @@ class MaskedLayer(torch.nn.Module):
         self.mask = torch.nn.Parameter(mask, requires_grad=False)
 
         # used to compute flow going through node
-        self.register_buffer('flow', torch.zeros_like(layer.weight))
         self._activation = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        self._activation = x.detach() # for flow computation
+        self._activation = x # for flow computation
 
         masked_weight = MaskedWeight.apply(self.layer.weight, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
         if isinstance(self.layer, torch.nn.Linear): # there are much better ways to do this but it works for now
@@ -101,27 +100,6 @@ class MaskedLayer(torch.nn.Module):
 
         return flop_estimate(self.total_weights()), flop_estimate(self.active_weights())
 
-    def accumulate_flow(self) -> None:
-        if self.layer.weight.grad is None or self._activation is None:
-            return
-
-        if isinstance(self.layer, torch.nn.Linear):
-            act = self._activation.detach().abs()
-            grad = self.layer.weight.grad.detach().abs()
-            flow_batch = grad * act.mean(dim=0, keepdim=True) * self.mask
-            self.flow += flow_batch
-
-        elif isinstance(self.layer, torch.nn.Conv2d):
-            # per-kernel element flow: multiply grad by mean input activation
-            act_mean = self._activation.detach().abs().mean(dim=(0, 2, 3), keepdim=True)  # [1, in, 1, 1]
-            grad = self.layer.weight.grad.detach().abs()  # [out, in, kH, kW]
-            self.flow += grad * act_mean * self.mask
-        else:
-            raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
-
-    def reset_flow(self) -> None:
-        self.flow.zero_()
-
 class NetworkInterface(torch.nn.Module, ABC):
 
     def expected_sparsity(self) -> float:
@@ -138,14 +116,3 @@ class NetworkInterface(torch.nn.Module, ABC):
 
     def total_weights(self) -> int:
         return sum([layer.total_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])
-
-    def accumulate_flow(self) -> None:
-        for layer in self.modules():
-            if isinstance(layer, MaskedLayer):
-                layer.accumulate_flow()
-
-    def reset_flow(self) -> None:
-        with torch.no_grad():
-            for layer in self.modules():
-                if isinstance(layer, MaskedLayer):
-                    layer.reset_flow()

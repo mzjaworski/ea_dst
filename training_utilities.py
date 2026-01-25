@@ -50,8 +50,6 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                     regrowth_strategy.apply(pruned_count, pruned_layer)
                     # not assigning back should be safe as we deal with references
 
-            layer.reset_flow() # after we are done with all the prunning time to reset the flow
-
     return model
 
 # some statistics have to be tracked globally
@@ -73,7 +71,6 @@ def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
     model.mean_loss = []
     model.std_loss = []
     model.neuron_dormancy = []
-    # model.gradients = []
     return model
 
 # instantiates network with all statistics to track
@@ -104,7 +101,7 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
     return model
 
 # helper for running forward/backward pass that computes all scores
-def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict) -> Tuple[torch.nn.Module, Dict]:
+def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict, log: bool) -> Tuple[torch.nn.Module, Dict]:
 
     logits = []
     for model in models:
@@ -123,55 +120,60 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
 
         # get loss
         loss = criterion(outputs, targets) # get loss
-        model.optimizer.zero_grad() # zero gradients
-        loss.mean().backward(retain_graph=True) # compute gradients but DO NOT DROP computational graph
 
-        for layer in model.modules():
-            if isinstance(layer, src.network.detail.MaskedLayer):
-                print(f"pure_loss: {layer.layer.weight.grad * layer.mask}")
-                break
-
-        model.reset_flow() # set flow to zero
-        model.accumulate_flow() # update flow using gradients
-        model.optimizer.zero_grad() # zero gradients
+        # model.optimizer.zero_grad() # zero gradients
+        # loss.mean().backward(retain_graph=True) # compute gradients but DO NOT DROP computational graph - we need it for flow estimation
+        # for layer in model.modules():
+        #     if isinstance(layer, src.network.detail.MaskedLayer):
+        #         print(f"pure_loss: {layer.layer.weight.grad * layer.mask}, {torch.min(layer.layer.weight.grad * layer.mask)}, {torch.max(layer.layer.weight.grad * layer.mask)}")
+        #         break
 
         loss_flow = 0.0
         layer_count = 0
+
         for layer in model.modules():
             if not isinstance(layer, src.network.detail.MaskedLayer):
                 continue
 
-            flow = layer.flow
-            mask = layer.mask
+            activation = layer._activation.detach().abs()
+            weight = layer.layer.weight.abs()
+            mask = layer.mask.bool()
 
-            # ignore inactive edges
-            flow_active = flow * mask
+            # assert torch.isfinite(activation).all()
+            # assert torch.isfinite(weight).all()
+            # assert torch.isfinite(mask).all()
 
-            if flow.dim() == 2:  # Linear [out, in]
-                row_sum = flow_active.sum(dim=1, keepdim=True) + 1e-12
-                p = flow_active / row_sum
-            elif flow.dim() == 4:  # Conv2d [out, in, kH, kW]
-                row_sum = flow_active.sum(dim=(1, 2, 3), keepdim=True) + 1e-12
-                p = flow_active / row_sum
+            if isinstance(layer.layer, torch.nn.Linear):
+                activation = activation.mean(dim=0, keepdim=True)
+            elif isinstance(layer.layer, torch.nn.Conv2d):
+                activation = activation.mean(dim=(0, 2, 3), keepdim=True)
             else:
-                continue
+                raise RuntimeError("cannot estimate flow - unsupported layer type!")
 
-            loss_flow += (p ** 2 * mask).sum() / (mask.sum() + 1e-12)
+            flow = (weight * activation)[mask] + 1e-12
+            flow = flow / flow.sum()
+
+            entropy = -(flow * flow.log()).sum()
+            entropy /= torch.log(torch.tensor(float(flow.numel()), device=flow.device))
+
+            loss_flow += entropy
             layer_count += 1
 
-        loss_flow /= layer_count
-        print(loss_flow)
+            if log:
+                print(entropy)
 
-        alpha = 1.0
-        flow_contribution = (loss.mean().detach() / (loss_flow.detach() + 1e-12))
-        task_loss = ((1.0 - alpha) * loss.mean()) + (alpha * flow_contribution * loss_flow)
+        loss_flow /= max(layer_count, 1)
 
+        alpha = 0.0
+        task_loss = loss.mean() * (1 - alpha * loss_flow)
+
+        model.optimizer.zero_grad() # zero gradients
         task_loss.backward()
 
-        for layer in model.modules():
-            if isinstance(layer, src.network.detail.MaskedLayer):
-                print(f"task_loss: {layer.layer.weight.grad * layer.mask}")
-                break
+        # for layer in model.modules():
+        #     if isinstance(layer, src.network.detail.MaskedLayer):
+        #         print(f"task_loss: {layer.layer.weight.grad * layer.mask}, {torch.min(layer.layer.weight.grad * layer.mask)}, {torch.max(layer.layer.weight.grad * layer.mask)}")
+        #         break
 
         # store stats
         with torch.no_grad():
@@ -180,7 +182,6 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
             model.mean_loss.append(loss.mean().item())
             model.std_loss.append(loss.std().item())
             model.neuron_dormancy.append(scores)
-            #model.gradients.append(src.utilities.extract_gradients(model)) # TODO figure out how to summarize this efficiently
             model.seen_batches += 1
 
         model.optimizer.step()
@@ -229,16 +230,12 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "median_loss": numpy.mean(children[0].median_loss),
         "mean_loss": numpy.mean(children[0].mean_loss),
         "std_loss": numpy.mean(children[0].std_loss),
-        # "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
-        # "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
         "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
 
         # population statistics
         "p_median_loss": numpy.mean([numpy.mean(child.median_loss) for child in children]),
         "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
         "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
-        # "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
-        # "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
         "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
 
         # miscellaneous

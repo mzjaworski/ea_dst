@@ -95,7 +95,7 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: floa
         c.rank = float(numpy.mean(alpha * level + (1.0 - alpha) * slope))
 
     return candidates
-
+#
 # # rank based ordering
 # def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
 #
@@ -104,7 +104,7 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: floa
 #             c.rank = 0.0
 #         return candidates
 #
-#     mean_loss = numpy.array([c.composite_loss for c in candidates])
+#     mean_loss = numpy.array([c.mean_loss for c in candidates])
 #     diff_loss = numpy.diff(mean_loss, axis=1)
 #
 #     # align loss with change
@@ -149,7 +149,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 child.lr_decay.step()
 
         # train for one epoch
-        for (inputs, targets) in train_loader:
+        for batch_index, (inputs, targets) in enumerate(train_loader):
             inputs, targets = inputs.to(device), targets.to(device)
 
             # update population
@@ -161,7 +161,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     children.sort(key=lambda c: float(numpy.mean(c.mean_loss)))
                     print([(child.index, (lambda c: float(numpy.mean(c.mean_loss)))(child)) for child in children])
                     children.sort(key=lambda c: float(numpy.mean(c.composite_loss)))
-                    print([(child.index, (lambda c: float(numpy.mean(c.mean_loss)))(child)) for child in children])
+                    print([(child.index, (lambda c: float(numpy.mean(c.composite_loss)))(child)) for child in children])
 
 
                     children = rank_models(children, alpha=alpha)
@@ -178,7 +178,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     children.append(child)
 
             # train population
-            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics)
+            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics, batch_index == 0)
 
         # log epoch end time
         statistics["epoch_end"] = time.perf_counter()
