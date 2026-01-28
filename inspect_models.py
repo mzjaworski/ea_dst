@@ -35,7 +35,46 @@ def generate_filename(s: str, length: int = 32) -> str:
     h = hashlib.sha256(s.encode("utf-8")).hexdigest()
     return h[:length]
 
-def load_or_convert(model: torch.nn.Module, folder_name: str, model_path: str):
+def convert_to_graph(model: torch.nn.Module) -> Tuple[graph_tool.Graph, List[int]]:
+
+    # collect only custom layers
+    layers = []
+    for layer in model.modules():
+        if not isinstance(layer, src.network.detail.MaskedLayer):
+            continue
+        if not isinstance(layer.layer, torch.nn.Linear):
+            raise RuntimeError("currently only linear layers are supported!")
+        layers.append(layer)
+
+    if not layers:
+        raise RuntimeError("No masked layers found!")
+
+    # create graph
+    graph = graph_tool.Graph(directed=True)
+    vertices = []
+
+    # create vertices for input layer
+    input_vertices = [graph.add_vertex() for _ in range(layers[0].mask.shape[1])]
+    vertices.append(input_vertices)
+
+    # now create vertices for every layer output
+    for layer in layers:
+        layer_vertices = [graph.add_vertex() for _ in range(layer.mask.shape[0])]
+        vertices.append(layer_vertices)
+
+    # add edges according to each layers mask
+    for layer_index, layer in enumerate(layers):
+        mask = layer.mask
+        out_dim, in_dim = mask.shape
+
+        for i in range(out_dim):
+            for j in range(in_dim):
+                if mask[i, j]:
+                    graph.add_edge(vertices[layer_index][j], vertices[layer_index + 1][i])
+
+    return graph, [len(layer) for layer in vertices]
+
+def load_or_convert(model: torch.nn.Module, folder_name: str, model_path: str) -> Tuple[graph_tool.Graph, List[int]]:
     base_dir = pathlib.Path(f"data/network_analysis/network/{folder_name}")
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -56,21 +95,6 @@ def load_or_convert(model: torch.nn.Module, folder_name: str, model_path: str):
         pickle.dump(meta, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     return graph, meta
-
-# llm generated
-def gini(x: numpy.ndarray) -> float:
-    if x.size == 0:
-        return numpy.nan
-
-    x = numpy.asarray(x, dtype=numpy.float64)
-    if numpy.all(x == 0):
-        return 0.0
-
-    x = numpy.sort(x)
-    n = x.size
-    cumx = numpy.cumsum(x)
-
-    return (n + 1 - 2 * numpy.sum(cumx) / cumx[-1]) / n
 
 # llm generated
 def build_accessor_map(obj, prefix=""):
@@ -156,46 +180,6 @@ def measure_correlation(statistics: List[dict], folder_name: str = "none") -> No
         if rejected:
             print(f"{field_name}: {p_value} {correlation}")
 
-
-def convert_to_graph(model: torch.nn.Module) -> Tuple[Graph, List[int]]:
-
-    # collect only custom layers
-    layers = []
-    for layer in model.modules():
-        if not isinstance(layer, src.network.detail.MaskedLayer):
-            continue
-        if not isinstance(layer.layer, torch.nn.Linear):
-            raise RuntimeError("currently only linear layers are supported!")
-        layers.append(layer)
-
-    if not layers:
-        raise RuntimeError("No masked layers found!")
-
-    # create graph
-    graph = Graph(directed=True)
-    vertices = []
-
-    # create vertices for input layer
-    input_vertices = [graph.add_vertex() for _ in range(layers[0].mask.shape[1])]
-    vertices.append(input_vertices)
-
-    # now create vertices for every layer output
-    for layer in layers:
-        layer_vertices = [graph.add_vertex() for _ in range(layer.mask.shape[0])]
-        vertices.append(layer_vertices)
-
-    # add edges according to each layers mask
-    for layer_index, layer in enumerate(layers):
-        mask = layer.mask
-        out_dim, in_dim = mask.shape
-
-        for i in range(out_dim):
-            for j in range(in_dim):
-                if mask[i, j]:
-                    graph.add_edge(vertices[layer_index][j], vertices[layer_index + 1][i])
-
-    return graph, [len(layer) for layer in vertices]
-
 def global_statistics(graph: Graph, vertex_property, layer_sizes: list, connected_only: bool = False) -> dict:
     layer_start = 0
 
@@ -215,7 +199,8 @@ def global_statistics(graph: Graph, vertex_property, layer_sizes: list, connecte
         'mean': float(values.mean()),
         'std': float(values.std()),
         'median': float(numpy.median(values)),
-        'gini': float(gini(values))
+        'min': float(numpy.min(values)),
+        'max': float(numpy.max(values))
     }
 
 def local_statistics(graph: Graph, vertex_property, layer_sizes: list, connected_only: bool = False) -> List[dict]:
@@ -238,12 +223,89 @@ def local_statistics(graph: Graph, vertex_property, layer_sizes: list, connected
             'mean': float(layer_values.mean()),
             'std': float(layer_values.std()),
             'median': float(numpy.median(layer_values)),
-            'gini': float(gini(layer_values))
+            'min': float(numpy.min(layer_values)),
+            'max': float(numpy.max(layer_values))
         })
 
         layer_start += layer_size
 
     return local_stats
+
+
+
+
+
+def reachable_from(graph: Graph, source: int) -> numpy.ndarray:
+    class ReachabilityVisitor(BFSVisitor):
+        def __init__(self, reached: numpy.ndarray):
+            self.reached = reached
+
+        def discover_vertex(self, u):
+            self.reached[int(u)] = True
+
+    visitor = ReachabilityVisitor(numpy.zeros(graph.num_vertices(), dtype=bool))
+    bfs_search(graph, graph.vertex(source), visitor)
+
+    return visitor.reached
+
+def reachable_from_input(graph: Graph, neuron_counts: list[int]) -> numpy.ndarray:
+    g = graph.copy()
+
+    phantom = g.add_vertex()
+    n_inputs = neuron_counts[0]
+
+    for v in range(n_inputs):
+        g.add_edge(phantom, g.vertex(v))
+
+    reached = reachable_from(g, int(phantom))
+
+    return reached[:-1]
+
+def reachable_from_output(graph: Graph, neuron_counts: list[int]) -> numpy.ndarray:
+    g = graph.copy()
+    g.set_reversed(True)
+
+    phantom = g.add_vertex()
+    offset = sum(neuron_counts[:-1])
+
+    for v in range(neuron_counts[-1]):
+        g.add_edge(phantom, g.vertex(offset + v))
+
+    reached = reachable_from(g, int(phantom))
+
+    return reached[:-1]
+
+def functional_core(graph: Graph, neuron_counts: list[int]) -> numpy.ndarray:
+    return reachable_from_input(graph, neuron_counts) & reachable_from_output(graph, neuron_counts)
+
+def extract_functional_core(graph: Graph, neuron_counts: list[int]) -> Tuple[Graph, List[int]]:
+    core_graph = Graph(directed=graph.is_directed())
+    core_neuron_counts = []
+
+    # get mask specifying all nodes jointly reachable from input and output layers
+    functional_core_mask = functional_core(graph, neuron_counts)
+
+    # propagate vertices
+    vertex_map = {}
+    for v in graph.vertices():
+        idx = int(v)
+        if functional_core_mask[idx]:
+            vertex_map[idx] = int(core_graph.add_vertex())
+
+    # propagate edges
+    for e in graph.edges():
+        u = int(e.source())
+        v = int(e.target())
+        if functional_core_mask[u] and functional_core_mask[v]:
+            core_graph.add_edge(core_graph.vertex(vertex_map[u]), core_graph.vertex(vertex_map[v]))
+
+    # update number of neuron_counts
+    start = 0
+    for layer_size in neuron_counts:
+        core_neuron_counts.append(float(numpy.sum(functional_core_mask[start : start + layer_size])))
+        start += layer_size
+
+    return core_graph, core_neuron_counts
 
 
 if __name__ == "__main__":
@@ -308,7 +370,7 @@ if __name__ == "__main__":
 
                 # load model
                 model = model_factory().to(device)
-                model.load_state_dict(torch.load(model_path, map_location=device))
+                model.load_state_dict(torch.load(model_path, map_location=device), strict=False)
                 model.eval()
 
                 # get its accuracy
@@ -317,6 +379,20 @@ if __name__ == "__main__":
 
                 # check if we already converted this network before
                 graph, neuron_counts = load_or_convert(model, folder_name, model_path)
+
+                print(neuron_counts)
+                graph, neuron_counts = extract_functional_core(graph, neuron_counts)
+                print(neuron_counts)
+
+                exit(0)
+
+
+
+
+
+
+
+
 
                 # spawn major fields
                 data["metrics"] = {}

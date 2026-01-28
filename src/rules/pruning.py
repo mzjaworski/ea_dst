@@ -78,6 +78,76 @@ class FlowPruning(Pruning):
     def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
         self._pruned_fraction = strategy.decay(self._pruned_fraction)
 
+class FlowPruning2(Pruning):
+
+    def __init__(self, pruned_fraction: float, entrenchment_penalty: float):
+        if pruned_fraction < 0.0 or pruned_fraction > 1.0:
+            raise ValueError("pruned_fraction must be in [0.0, 1.0]")
+
+        self._pruned_fraction = pruned_fraction
+        self.entrenchment_penalty = entrenchment_penalty  # used as λ (entrenchment penalty)
+
+    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
+
+        mask = layer.mask.data
+        flow = layer.flow.data
+        persistence = layer.persistence.data
+
+        flat_mask = mask.view(-1)
+        flat_flow = flow.view(-1)
+        flat_persist = persistence.view(-1)
+
+        # active edges
+        active_idx = (flat_mask == 1).nonzero(as_tuple=True)[0]
+        total_active = active_idx.numel()
+        if total_active == 0:
+            return 0, layer
+
+        # number to prune
+        pruned_count = max(int(self._pruned_fraction * total_active), 1)
+
+        # --- exposure-aware pruning score ---
+        # score = flow / (1 + λ * persistence)
+        scores = flat_flow[active_idx] #/ (1.0 + self.entrenchment_penalty * flat_persist[active_idx])
+
+        # print(f"persistence - mean: {flat_persist[active_idx].mean().cpu().item():.3f}")
+        # print(f"score - min: {scores.min().cpu().item()}, max: {scores.max().cpu().item()}, mean: {scores.mean().cpu().item()}")
+
+        # sort ascending (lowest score pruned first)
+        sorted_scores, order = torch.sort(scores, descending=False)
+
+        # soft selection (keeps your existing stochasticity)
+        sel_mask = src.utilities.soft_top_k(sorted_scores, select=pruned_count, decay_rate=None)
+
+        sorted_idx = active_idx[order]
+        to_prune = sorted_idx[sel_mask]
+        num_pruned = to_prune.numel()
+
+        if num_pruned == 0:
+            return 0, layer
+
+        # --- apply pruning ---
+        flat_mask[to_prune] = 0
+
+        # reset persistence of pruned edges
+        flat_persist[to_prune] = 0
+
+        # increment persistence of surviving active edges
+        survivors = active_idx[~sel_mask]
+        flat_persist[survivors] += 1
+
+        # write back
+        layer.mask.data = flat_mask.view_as(mask)
+        layer.persistence.data = flat_persist.view_as(persistence)
+
+        return num_pruned, layer
+
+    def pruned_fraction(self) -> float:
+        return self._pruned_fraction
+
+    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
+        self._pruned_fraction = strategy.decay(self._pruned_fraction)
+
 class MagnitudePruning(Pruning):
 
     def __init__(self, pruned_fraction: float, decay_rate: float):

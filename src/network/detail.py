@@ -50,6 +50,8 @@ class MaskedLayer(torch.nn.Module):
         self.mask = torch.nn.Parameter(mask, requires_grad=False)
 
         # used to compute flow going through node
+        self.register_buffer('flow', torch.zeros_like(layer.weight))
+        self.register_buffer('persistence', torch.zeros_like(layer.weight))
         self._activation = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -100,6 +102,27 @@ class MaskedLayer(torch.nn.Module):
 
         return flop_estimate(self.total_weights()), flop_estimate(self.active_weights())
 
+    def accumulate_flow(self) -> None:
+        if self.layer.weight.grad is None or self._activation is None:
+            return
+
+        act = self._activation.detach().abs()
+        grad = self.layer.weight.grad.detach().abs()
+        weight = self.layer.weight.detach().abs()
+        mask = self.mask
+
+        if isinstance(self.layer, torch.nn.Linear):
+            dim = 0
+        elif isinstance(self.layer, torch.nn.Conv2d):
+            dim = (0, 2, 3)
+        else:
+            raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
+
+        self.flow += grad * (act.mean(dim=dim, keepdim=True) * weight) * self.mask
+
+    def reset_flow(self) -> None:
+        self.flow.zero_()
+
 class NetworkInterface(torch.nn.Module, ABC):
 
     def expected_sparsity(self) -> float:
@@ -116,3 +139,14 @@ class NetworkInterface(torch.nn.Module, ABC):
 
     def total_weights(self) -> int:
         return sum([layer.total_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])
+
+    def accumulate_flow(self) -> None:
+        for layer in self.modules():
+            if isinstance(layer, MaskedLayer):
+                layer.accumulate_flow()
+
+    def reset_flow(self) -> None:
+        with torch.no_grad():
+            for layer in self.modules():
+                if isinstance(layer, MaskedLayer):
+                    layer.reset_flow()

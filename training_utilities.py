@@ -50,6 +50,8 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                     regrowth_strategy.apply(pruned_count, pruned_layer)
                     # not assigning back should be safe as we deal with references
 
+            layer.reset_flow()  # set flow to zero
+
     return model
 
 # some statistics have to be tracked globally
@@ -100,23 +102,62 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
 
     return model
 
+def clamp(x, lo, hi):
+    return max(lo, min(x, hi))
+
 # helper for running forward/backward pass that computes all scores
-def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict, log: bool) -> Tuple[torch.nn.Module, Dict]:
+def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict, epoch: int, batch: int) -> Tuple[torch.nn.Module, Dict]:
 
     logits = []
     for model in models:
         statistics["total_batches"] += 1
 
-        normalized_activations = []
+        neuron_entropy = []
         scores = []
         def compute_dormancy_score(module: torch.nn.Module, input: torch.Tensor, output: torch.Tensor) -> None:
-            nonlocal normalized_activations, scores
-            normalized_activation, score = module.dormancy_score(output)
-            normalized_activations.append(normalized_activation / normalized_activation.sum())
+            nonlocal neuron_entropy, scores
+
+            layer_activation, score = module.dormancy_score(output)
+            p = (layer_activation / layer_activation.sum()).clamp_min(1e-12)
+
+            _entropy = -(p * p.log()).sum()
+            _entropy /= torch.log(torch.tensor(float(p.numel()), device=p.device))
+
+            neuron_entropy.append(_entropy)
             scores.append(score)
 
-        # compute forward with neuron dormancy
-        handles = [m.register_forward_hook(compute_dormancy_score) for m in model.modules() if isinstance(m, src.network.detail.ActivationFunctionWrapper)]
+        edge_entropy = []
+        def compute_edge_entropy(module: torch.nn.Module, input: torch.Tensor, output: torch.Tensor) -> None:
+            nonlocal edge_entropy
+
+            weight = module.layer.weight.abs()
+            mask = module.mask.bool()
+            activation = module._activation.detach().abs()
+
+            # activation statistics (sign-free)
+            if activation.dim() == 2:
+                dim = 0
+            elif activation.dim() == 4:
+                dim = (0, 2, 3)
+            else:
+                raise RuntimeError("Unsupported activation shape")
+
+            activation = activation.mean(dim=dim, keepdim=True)
+
+            # edge flows
+            flow = (weight * activation)[mask]
+            flow = flow.clamp_min(1e-12)
+
+            probability = flow / flow.sum()
+
+            _entropy = -(probability * probability.log()).sum()
+            _entropy = _entropy / torch.log(torch.tensor(float(flow.numel()), device=weight.device))
+
+            edge_entropy.append(_entropy)
+
+        # compute forward with neuron dormancy and edge entropy
+        handles = [m.register_forward_hook(compute_dormancy_score) for m in model.modules() if isinstance(m, src.network.detail.ActivationFunctionWrapper)] \
+                + [m.register_forward_hook(compute_edge_entropy) for m in model.modules() if isinstance(m, src.network.detail.MaskedLayer)]
         outputs = model(input)
         for h in handles:
             h.remove()
@@ -131,26 +172,17 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
         #         print(f"pure_loss: {layer.layer.weight.grad * layer.mask}, {torch.min(layer.layer.weight.grad * layer.mask)}, {torch.max(layer.layer.weight.grad * layer.mask)}")
         #         break
 
-        loss_flow = 0.0
-        layer_count = 0
+        # if batch == 0:
+        #     print(f"neuron_entropy: {torch.stack(neuron_entropy).detach().cpu().numpy().tolist()}")
+        #     print(f"edge_entropy: {torch.stack(edge_entropy).detach().cpu().numpy().tolist()}")
 
-        for layer_activation in normalized_activations:
-            p = layer_activation.clamp_min(1e-12)
+        neuron_entropy = torch.stack(neuron_entropy).mean(dim=0)
+        edge_entropy = torch.stack(edge_entropy).mean(dim=0)
 
-            entropy = -(p * p.log()).sum()
-            entropy /= torch.log(torch.tensor(float(p.numel()), device=p.device))
+        alpha = 0.125
+        beta = 1.0
 
-            loss_flow += entropy
-            layer_count += 1
-
-            # if log:
-            #     print(entropy)
-
-        # Average over all layers
-        loss_flow /= max(layer_count, 1)
-
-        alpha = 0.25
-        task_loss = loss.mean() * (1 - alpha * loss_flow)
+        task_loss = loss.mean()# * (1 - alpha * (beta * neuron_entropy + (1.0 - beta) * edge_entropy))
 
         model.optimizer.zero_grad() # zero gradients
         task_loss.backward()
@@ -168,6 +200,7 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
             model.std_loss.append(loss.std().item())
             model.neuron_dormancy.append(scores)
             model.seen_batches += 1
+            model.accumulate_flow()
 
         model.optimizer.step()
         logits.append(outputs)

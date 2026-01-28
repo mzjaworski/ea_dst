@@ -178,7 +178,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     children.append(child)
 
             # train population
-            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics, batch_index == 0)
+            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics, current_epoch, batch_index)
 
         # log epoch end time
         statistics["epoch_end"] = time.perf_counter()
@@ -220,7 +220,7 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
                 child.lr_decay.step()
 
         # train for one epoch
-        for (inputs, targets) in train_loader:
+        for batch_index, (inputs, targets) in enumerate(train_loader):
             inputs, targets = inputs.to(device), targets.to(device)
 
             halving_time, survivor_count, current_alpha = halving_scheduler()
@@ -248,7 +248,7 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
                     children.append(child)
 
             # train population
-            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics)
+            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics, batch_index == 0)
 
         # log epoch end time
         statistics["epoch_end"] = time.perf_counter()
