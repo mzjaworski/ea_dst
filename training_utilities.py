@@ -44,13 +44,14 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                 continue
 
             # apply removal/regrowth only for layers that actually require it
-            if layer.expected_sparsity() > 0.0:
+            if layer.realized_sparsity() < 1.0:
                 for (prunning_strategy, regrowth_strategy) in zip(pruning_strategies, regrowth_strategies):
                     pruned_count, pruned_layer = prunning_strategy.apply(layer)
                     regrowth_strategy.apply(pruned_count, pruned_layer)
                     # not assigning back should be safe as we deal with references
 
             layer.reset_flow()  # set flow to zero
+            print(layer.realized_sparsity())
 
     return model
 
@@ -126,38 +127,8 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
             neuron_entropy.append(_entropy)
             scores.append(score)
 
-        edge_entropy = []
-        def compute_edge_entropy(module: torch.nn.Module, input: torch.Tensor, output: torch.Tensor) -> None:
-            nonlocal edge_entropy
-
-            weight = module.layer.weight.abs()
-            mask = module.mask.bool()
-            activation = module._activation.detach().abs()
-
-            # activation statistics (sign-free)
-            if activation.dim() == 2:
-                dim = 0
-            elif activation.dim() == 4:
-                dim = (0, 2, 3)
-            else:
-                raise RuntimeError("Unsupported activation shape")
-
-            activation = activation.mean(dim=dim, keepdim=True)
-
-            # edge flows
-            flow = (weight * activation)[mask]
-            flow = flow.clamp_min(1e-12)
-
-            probability = flow / flow.sum()
-
-            _entropy = -(probability * probability.log()).sum()
-            _entropy = _entropy / torch.log(torch.tensor(float(flow.numel()), device=weight.device))
-
-            edge_entropy.append(_entropy)
-
         # compute forward with neuron dormancy and edge entropy
-        handles = [m.register_forward_hook(compute_dormancy_score) for m in model.modules() if isinstance(m, src.network.detail.ActivationFunctionWrapper)] \
-                + [m.register_forward_hook(compute_edge_entropy) for m in model.modules() if isinstance(m, src.network.detail.MaskedLayer)]
+        handles = [m.register_forward_hook(compute_dormancy_score) for m in model.modules() if isinstance(m, src.network.detail.ActivationFunctionWrapper)]
         outputs = model(input)
         for h in handles:
             h.remove()
@@ -172,15 +143,9 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
         #         print(f"pure_loss: {layer.layer.weight.grad * layer.mask}, {torch.min(layer.layer.weight.grad * layer.mask)}, {torch.max(layer.layer.weight.grad * layer.mask)}")
         #         break
 
-        # if batch == 0:
-        #     print(f"neuron_entropy: {torch.stack(neuron_entropy).detach().cpu().numpy().tolist()}")
-        #     print(f"edge_entropy: {torch.stack(edge_entropy).detach().cpu().numpy().tolist()}")
-
         neuron_entropy = torch.stack(neuron_entropy).mean(dim=0)
-        edge_entropy = torch.stack(edge_entropy).mean(dim=0)
 
         alpha = 0.125
-        beta = 1.0
 
         task_loss = loss.mean()# * (1 - alpha * (beta * neuron_entropy + (1.0 - beta) * edge_entropy))
 
@@ -257,7 +222,6 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
 
         # miscellaneous
-        "expected_sparsity": children[0].expected_sparsity(),
         "realized_sparsity": children[0].realized_sparsity(),
         "active_weights": children[0].active_weights(),
         "total_weights": children[0].total_weights(),

@@ -1,6 +1,27 @@
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, List
 import torch
+import src.network.mask_initialization
+
+def initialize_masks(network: torch.nn.Module, method: str = 'uniform', sparsity: float = 1.0) -> None:
+    assert 0.0 <= sparsity < 1.0, "sparsity must be in [0, 1.0)"
+
+    layers = []
+
+    for module in network.modules():
+        if isinstance(module, MaskedLayer):
+            layers.append(module)
+
+    if method == 'uniform':
+        for layer in layers:
+            layer.mask.copy_(src.network.mask_initialization.uniform(layer.mask, sparsity))
+    elif method == 'erk':
+        epsilon = src.network.mask_initialization.compute_erk_epsilon([layer.fan_out_fan_in() for layer in layers], sparsity)
+        for layer in layers:
+            layer.mask.copy_(src.network.mask_initialization.erk(layer.mask, epsilon))
+    else:
+        raise RuntimeError(f"unsupported mask initialization: {method}")
+
 
 class ActivationFunctionWrapper(torch.nn.Module):
 
@@ -35,23 +56,17 @@ class MaskedWeight(torch.autograd.Function):
         return gradient, None
 
 class MaskedLayer(torch.nn.Module):
-    def __init__(self, layer: torch.nn.Module, sparsity: float):
+    def __init__(self, layer: torch.nn.Module):
         super().__init__()
         assert isinstance(layer, (torch.nn.Linear, torch.nn.Conv2d)), "MaskedLayer supports Linear or Conv2d only"
-        assert 0.0 <= sparsity < 1.0, "sparsity must be in [0, 1.0)"
 
         self.layer = layer
-        self.sparsity = sparsity
-
-        # Create mask with given sparsity
-        mask = torch.zeros_like(layer.weight)
-        k = int((1 - sparsity) * mask.numel())
-        mask.view(-1)[torch.randperm(mask.numel())[:k]] = 1
-        self.mask = torch.nn.Parameter(mask, requires_grad=False)
+        self.mask = torch.nn.Parameter(torch.ones_like(layer.weight), requires_grad=False)
 
         # used to compute flow going through node
         self.register_buffer('flow', torch.zeros_like(layer.weight))
         self.register_buffer('persistence', torch.zeros_like(layer.weight))
+
         self._activation = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -64,8 +79,16 @@ class MaskedLayer(torch.nn.Module):
             return torch.nn.functional.conv2d(x, masked_weight, self.layer.bias, stride=self.layer.stride, padding=self.layer.padding, dilation=self.layer.dilation, groups=self.layer.groups)
         raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
-    def expected_sparsity(self) -> float:
-        return self.sparsity
+    def fan_out_fan_in(self) -> Tuple[int, int]:
+        if isinstance(self.layer, torch.nn.Linear):
+            n_out, n_in = self.layer.weight.shape
+            return n_out, n_in
+        elif isinstance(self.layer, torch.nn.Conv2d):
+            n_out, n_in, kH, kW = self.layer.weight.shape
+            fan_in = n_in * kH * kW
+            fan_out = n_out
+            return fan_out, fan_in
+        raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
     def realized_sparsity(self) -> float:
         return 1.0 - self.mask.sum().item() / self.mask.numel()
@@ -118,16 +141,12 @@ class MaskedLayer(torch.nn.Module):
         else:
             raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
-        self.flow += grad * (act.mean(dim=dim, keepdim=True) * weight) * self.mask
+        self.flow += grad * (act.mean(dim=dim, keepdim=True) * weight) * mask
 
     def reset_flow(self) -> None:
         self.flow.zero_()
 
 class NetworkInterface(torch.nn.Module, ABC):
-
-    def expected_sparsity(self) -> float:
-        data = [layer.expected_sparsity() for layer in self.modules() if isinstance(layer, MaskedLayer)]
-        return sum(data) / len(data)
 
     def realized_sparsity(self) -> float:
         data = [layer.realized_sparsity() for layer in self.modules() if isinstance(layer, MaskedLayer)]
