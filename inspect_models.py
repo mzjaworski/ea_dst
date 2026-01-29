@@ -261,7 +261,8 @@ if __name__ == "__main__":
                 # check if we already converted this network before
                 print(f"-------------------------------------------------------------------")
 
-                current_graph, current_neuron_counts = load_or_convert(model, folder_name, model_path)
+                current_graph, current_neuron_counts = graph.operations.convert_to_graph(model)
+                # current_graph, current_neuron_counts = load_or_convert(model, folder_name, model_path)
                 print(current_neuron_counts)
 
                 _current_graph, _current_neuron_counts = graph.operations.extract_input_reachable(current_graph, current_neuron_counts)
@@ -273,7 +274,7 @@ if __name__ == "__main__":
                 _current_graph, _current_neuron_counts = graph.operations.extract_functional_core(current_graph, current_neuron_counts)
                 print(_current_neuron_counts)
                 continue
-                exit(0)
+                # exit(0)
 
 
 

@@ -34,12 +34,12 @@ def convert_to_graph(model: torch.nn.Module) -> Tuple[graph_tool.Graph, List[int
 
     # add edges according to each layers mask
     for layer_index, layer in enumerate(layers):
-        mask = layer.mask
-        out_dim, in_dim = mask.shape
+        mask = layer.mask.tolist() # indexing native type is orders of magnitude faster
+        out_dim, in_dim = layer.mask.shape
 
         for i in range(out_dim):
             for j in range(in_dim):
-                if mask[i, j]:
+                if mask[i][j]:
                     graph.add_edge(vertices[layer_index][j], vertices[layer_index + 1][i])
 
     return graph, [len(layer) for layer in vertices]
