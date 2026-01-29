@@ -1,3 +1,4 @@
+from typing import List, Tuple
 import torch
 import numpy
 
@@ -7,46 +8,47 @@ def uniform(weights: torch.Tensor, sparsity: float) -> torch.Tensor:
     mask.view(-1)[torch.randperm(mask.numel())[:k]] = 1
     return mask
 
-def erk(weights: torch.Tensor, epsilon: float) -> torch.Tensor:
-    shape = weights.shape
+def erk(weights: torch.Tensor, fan_out_fan_in: Tuple[int, int], epsilon: float) -> torch.Tensor:
+    n_out, n_in = fan_out_fan_in
+    probability = min(epsilon * (n_in + n_out) / (n_in * n_out), 1.0)
+    return (torch.rand_like(weights) < probability).float()
 
-    if weights.ndim == 2:
-        n_out, n_in = shape
-    elif weights.ndim == 4:
-        n_out, n_in, kH, kW = shape
-        n_in = n_in * kH * kW
-    else:
-        raise ValueError(f"Unsupported weight shape: {shape}")
-
-    p = epsilon * (n_in + n_out) / (n_in * n_out)
-    p = min(p, 1.0)
-
-    return (torch.rand_like(weights) < p).float()
-
-def compute_erk_epsilon(layers, target_sparsity, erk_power: float = 1.0):
-    raw_probs = [(numpy.sum(shape) / numpy.prod(shape)) ** erk_power for shape in layers]
+# based/adapted of/from https://github.com/alooow/fantastic_weights_paper/blob/565c21f51fe977efda7def26276b3b7e554c8f91/sparselearning/sparsity_initializers.py#L37
+def compute_erk_initialization(layers: List[Tuple[int, int]], target_sparsity: float, erk_power: float = 1.0) -> Tuple[List[bool], float]:
+    target_density = 1.0 - target_sparsity
+    is_epsilon_valid = False
     dense_layers = set()
 
-    while True:
-        rhs = 0.0
+    while not is_epsilon_valid:
+
+        raw_probabilities = {}
         divisor = 0.0
-        for i, shape in enumerate(layers):
-            n_param = numpy.prod(shape)
-            if i in dense_layers:
-                continue
-            n_ones = (1 - target_sparsity) * n_param
-            rhs += n_ones
-            divisor += raw_probs[i] * n_param
+        rhs = 0.0
+
+        for idx, (fan_out, fan_in) in enumerate(layers):
+            n_param = fan_out * fan_in
+            n_zeros = n_param * (1.0 - target_density)
+            n_ones = n_param * target_density
+
+            if idx in dense_layers:
+                rhs -= n_zeros
+            else:
+                rhs += n_ones
+                raw_probabilities[idx] = ((fan_in + fan_out) / n_param) ** erk_power
+                divisor += raw_probabilities[idx] * n_param
 
         epsilon = rhs / divisor
 
-        # Check for layers exceeding probability 1
-        max_prob = max(raw_probs[i] for i in range(len(layers)) if i not in dense_layers)
-        if epsilon * max_prob > 1.0:
-            for i in range(len(layers)):
-                if raw_probs[i] == max_prob:
-                    dense_layers.add(i)
+        # check if any layer exceeds density=1 if yes mark it as dense
+        max_prob = max(raw_probabilities.values(), default=0)
+        if max_prob * epsilon > 1.0:
+            is_epsilon_valid = False
+            for idx, prob in raw_probabilities.items():
+                if prob == max_prob:
+                    dense_layers.add(idx)
         else:
-            break
+            is_epsilon_valid = True
 
-    return epsilon
+    is_dense = [idx in dense_layers for idx in range(len(layers))]
+
+    return is_dense, epsilon

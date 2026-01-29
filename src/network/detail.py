@@ -16,12 +16,12 @@ def initialize_masks(network: torch.nn.Module, method: str = 'uniform', sparsity
         for layer in layers:
             layer.mask.copy_(src.network.mask_initialization.uniform(layer.mask, sparsity))
     elif method == 'erk':
-        epsilon = src.network.mask_initialization.compute_erk_epsilon([layer.fan_out_fan_in() for layer in layers], sparsity)
-        for layer in layers:
-            layer.mask.copy_(src.network.mask_initialization.erk(layer.mask, epsilon))
+        is_dense, epsilon = src.network.mask_initialization.compute_erk_initialization([layer.fan_out_fan_in() for layer in layers], sparsity)
+        for dense, layer in zip(is_dense, layers):
+            if not dense:
+                layer.mask.copy_(src.network.mask_initialization.erk(layer.mask, layer.fan_out_fan_in(), epsilon))
     else:
         raise RuntimeError(f"unsupported mask initialization: {method}")
-
 
 class ActivationFunctionWrapper(torch.nn.Module):
 
@@ -149,12 +149,10 @@ class MaskedLayer(torch.nn.Module):
 class NetworkInterface(torch.nn.Module, ABC):
 
     def realized_sparsity(self) -> float:
-        data = [layer.realized_sparsity() for layer in self.modules() if isinstance(layer, MaskedLayer)]
-        return sum(data) / len(data)
+        return 1.0 - self.active_weights() / self.total_weights()
 
     def active_weights(self) -> int:
-        return sum(
-            [layer.active_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])
+        return sum([layer.active_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])
 
     def total_weights(self) -> int:
         return sum([layer.total_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])

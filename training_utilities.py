@@ -51,7 +51,7 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                     # not assigning back should be safe as we deal with references
 
             layer.reset_flow()  # set flow to zero
-            print(layer.realized_sparsity())
+            # print(layer.realized_sparsity())
 
     return model
 
@@ -147,7 +147,7 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
 
         alpha = 0.125
 
-        task_loss = loss.mean()# * (1 - alpha * (beta * neuron_entropy + (1.0 - beta) * edge_entropy))
+        task_loss = loss.mean()# * (1 - alpha * (neuron_entropy))
 
         model.optimizer.zero_grad() # zero gradients
         task_loss.backward()
