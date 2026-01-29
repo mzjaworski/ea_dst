@@ -16,10 +16,10 @@ def initialize_masks(network: torch.nn.Module, method: str = 'uniform', sparsity
         for layer in layers:
             layer.mask.copy_(src.network.mask_initialization.uniform(layer.mask, sparsity))
     elif method == 'erk':
-        is_dense, epsilon = src.network.mask_initialization.compute_erk_initialization([layer.fan_out_fan_in() for layer in layers], sparsity)
+        is_dense, epsilon = src.network.mask_initialization.compute_erk_initialization([layer.nout_nin_kh_kw() for layer in layers], sparsity)
         for dense, layer in zip(is_dense, layers):
             if not dense:
-                layer.mask.copy_(src.network.mask_initialization.erk(layer.mask, layer.fan_out_fan_in(), epsilon))
+                layer.mask.copy_(src.network.mask_initialization.erk(layer.mask, layer.nout_nin_kh_kw(), epsilon))
     else:
         raise RuntimeError(f"unsupported mask initialization: {method}")
 
@@ -79,15 +79,13 @@ class MaskedLayer(torch.nn.Module):
             return torch.nn.functional.conv2d(x, masked_weight, self.layer.bias, stride=self.layer.stride, padding=self.layer.padding, dilation=self.layer.dilation, groups=self.layer.groups)
         raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
-    def fan_out_fan_in(self) -> Tuple[int, int]:
+    def nout_nin_kh_kw(self) -> Tuple[int, int, int, int]: # amazing method name
         if isinstance(self.layer, torch.nn.Linear):
             n_out, n_in = self.layer.weight.shape
-            return n_out, n_in
+            return n_out, n_in, 0, 0
         elif isinstance(self.layer, torch.nn.Conv2d):
             n_out, n_in, kH, kW = self.layer.weight.shape
-            fan_in = n_in * kH * kW
-            fan_out = n_out
-            return fan_out, fan_in
+            return n_out, n_in, kH, kW
         raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
     def realized_sparsity(self) -> float:
