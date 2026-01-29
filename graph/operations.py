@@ -108,7 +108,7 @@ def extract_from_mask(graph: Graph, neuron_counts: list[int], mask: numpy.ndarra
     # update number of neuron_counts
     start = 0
     for layer_size in neuron_counts:
-        core_neuron_counts.append(float(numpy.sum(mask[start : start + layer_size])))
+        core_neuron_counts.append(int(numpy.sum(mask[start : start + layer_size])))
         start += layer_size
 
     return core_graph, core_neuron_counts

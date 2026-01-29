@@ -258,77 +258,31 @@ if __name__ == "__main__":
                 for (level, value) in training_utilities.top_k_accuracy(model, test_loader, device, [1]).items():
                     data["accuracy"] = value
 
-                # check if we already converted this network before
-                print(f"-------------------------------------------------------------------")
+                def derive_statistics(graph: graph_tool.Graph, neuron_counts: List[int]) -> dict:
+                    return {
+                        "neurons": [i for i in range(sum(neuron_counts))],
+                        "layer_neurons": neuron_counts,
+                        "in_degree": graph.degree_property_map("in").get_array().tolist(),
+                        "out_degree": graph.degree_property_map("out").get_array().tolist(),
+                        "total_degree": graph.degree_property_map("total").get_array().tolist(),
+                        "pagerank": graph_tool.centrality.pagerank(graph).get_array().tolist(),
+                        "betweenness": graph_tool.centrality.betweenness(graph)[0].get_array().tolist(),
+                        "katz_centrality": graph_tool.centrality.katz(graph).get_array().tolist(),
+                        "k_core": graph_tool.topology.kcore_decomposition(graph).get_array().tolist()
+                    }
 
+                # convert network and compute its statistics
                 current_graph, current_neuron_counts = graph.operations.convert_to_graph(model)
-                # current_graph, current_neuron_counts = load_or_convert(model, folder_name, model_path)
-                print(current_neuron_counts)
+                data["full"] = derive_statistics(current_graph, current_neuron_counts)
 
                 _current_graph, _current_neuron_counts = graph.operations.extract_input_reachable(current_graph, current_neuron_counts)
-                print(_current_neuron_counts)
+                data["forward"] = derive_statistics(_current_graph, _current_neuron_counts)
 
                 _current_graph, _current_neuron_counts = graph.operations.extract_output_reachable(current_graph, current_neuron_counts)
-                print(_current_neuron_counts)
+                data["backward"] = derive_statistics(_current_graph, _current_neuron_counts)
 
                 _current_graph, _current_neuron_counts = graph.operations.extract_functional_core(current_graph, current_neuron_counts)
-                print(_current_neuron_counts)
-                continue
-                # exit(0)
-
-
-
-
-
-
-
-
-
-                # spawn major fields
-                data["metrics"] = {}
-                data["metrics"]["global"] = {}
-                data["metrics"]["local"] = {}
-
-                # not defined for DAG-s
-                # eigenvalue, eigenvector = graph_tool.centrality.eigenvector(graph)
-                # data["metrics"]["global"]['eigenvalue'] = eigenvalue
-                # data["metrics"]["global"]['eigenvector'] = global_statistics(graph, eigenvector)
-
-                in_degree = graph.degree_property_map("in")
-                data["metrics"]["global"]['in_degree'] = global_statistics(graph, in_degree, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['in_degree'] = local_statistics(graph, in_degree, neuron_counts, connected_only=True)
-
-                out_degree = graph.degree_property_map("out")
-                data["metrics"]["global"]['out_degree'] = global_statistics(graph, out_degree, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['out_degree'] = local_statistics(graph, out_degree, neuron_counts, connected_only=True)
-
-                total_degree = graph.degree_property_map("total")
-                data["metrics"]["global"]['total_degree'] = global_statistics(graph, total_degree, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['total_degree'] = local_statistics(graph, total_degree, neuron_counts, connected_only=True)
-
-                pagerank = graph_tool.centrality.pagerank(graph)
-                data["metrics"]["global"]['pagerank'] = global_statistics(graph, pagerank, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['pagerank'] = local_statistics(graph, pagerank, neuron_counts, connected_only=True)
-
-                vertex_betweenness, _ = graph_tool.centrality.betweenness(graph)
-                data["metrics"]["global"]['betweenness'] = global_statistics(graph, vertex_betweenness, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['betweenness'] = local_statistics(graph, vertex_betweenness, neuron_counts, connected_only=True)
-
-                closeness = graph_tool.centrality.closeness(graph)
-                data["metrics"]["global"]['closeness'] = global_statistics(graph, closeness, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['closeness'] = local_statistics(graph, closeness, neuron_counts, connected_only=True)
-
-                katz_centrality = graph_tool.centrality.katz(graph)
-                data["metrics"]["global"]['katz_centrality'] = global_statistics(graph, katz_centrality, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['katz_centrality'] = local_statistics(graph, katz_centrality, neuron_counts, connected_only=True)
-
-                shortest_distance = graph_tool.topology.shortest_distance(graph)
-                data["metrics"]["global"]['shortest_distance'] = global_statistics(graph, shortest_distance, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['shortest_distance'] = local_statistics(graph, shortest_distance, neuron_counts, connected_only=True)
-
-                k_core = graph_tool.topology.kcore_decomposition(graph)
-                data["metrics"]["global"]['k_core'] = global_statistics(graph, k_core, neuron_counts, connected_only=True)
-                data["metrics"]["local"]['k_core'] = local_statistics(graph, k_core, neuron_counts, connected_only=True)
+                data["functional"] = derive_statistics(_current_graph, _current_neuron_counts)
 
                 dataset.append(data)
 
@@ -336,12 +290,9 @@ if __name__ == "__main__":
                 json.dump(dataset, f)
 
         dataset.sort(key=lambda x: x["accuracy"], reverse=True)
-        for entry in dataset:
-            print(entry)
-
         all_statistics.append(dataset)
         settings.SingletonMeta._instances.pop(settings.Settings, None)
 
     if len(all_statistics):
-        plot_dataset(all_statistics, folder_name=folder_name)
-        #measure_correlation(dataset, folder_name=folder_name)
+        pass
+        # TODO plot statistics
