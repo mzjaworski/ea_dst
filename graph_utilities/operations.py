@@ -121,3 +121,13 @@ def extract_input_reachable(graph: Graph, neuron_counts: list[int]) -> Tuple[Gra
 
 def extract_output_reachable(graph: Graph, neuron_counts: list[int]) -> Tuple[Graph, List[int]]:
     return extract_from_mask(graph, neuron_counts, reachable_from_output(graph, neuron_counts))
+
+def per_layer(neuron_counts: list[int], data: numpy.ndarray, metric = numpy.sum) -> List[float]:
+    results = []
+
+    start = 0
+    for neuron_count in neuron_counts:
+        results.append(float(metric(data[start : start + neuron_count])))
+        start += neuron_count
+
+    return results

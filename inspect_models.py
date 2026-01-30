@@ -2,7 +2,7 @@ import training_utilities
 import utilities
 import settings
 
-from typing import List, Tuple
+from typing import List, Tuple, Union, Callable, Any
 import secrets
 import torch
 import numpy
@@ -20,7 +20,7 @@ import hashlib
 import scipy
 from statsmodels.stats.multitest import multipletests
 import pickle
-import graph.operations
+import graph_utilities.operations
 
 def generate_filename(s: str, length: int = 32) -> str:
     h = hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -76,118 +76,70 @@ def _get_by_path(obj, path):
             val = val[key]
     return val
 
-def plot_dataset(statistics: List[List[dict]], folder_name: str = "none") -> None:
+def extract_metrics(datasets: List[List[dict]], accessors: List[Callable[[dict], Any]]) -> List[List[Any]]:
+    results = [[] for _ in range(len(accessors))]
+
+    # extract data
+    for accessor_index, accessor in enumerate(accessors):
+        try:
+            for dataset_index, dataset in enumerate(datasets):
+                for entry_index, entry in enumerate(dataset):
+                    results[accessor_index].append(accessor(entry))
+        except:
+            pass #
+
+    # generate default labels
+    results.append([f"dataset_{dataset_index}" for dataset_index, dataset in enumerate(datasets) for entry in dataset])
+
+    return results
+
+def layerwise_profile(metrics: List[List[float]], performances: List[float], dataset_names: List[str], metric_name: str,
+                      quantiles: Tuple[float, float] = (0.25, 0.75), y_limits: Tuple[Union[float, None], Union[float, None]] = (None, None)) -> plt.Figure:
+    metrics = numpy.asarray(metrics)
+    performances = numpy.asarray(performances)
+    dataset_names = numpy.asarray(dataset_names)
+
+    figure, axis = plt.subplots(figsize=(8, 5))
+
+    palette = ["red", "blue", "green", "orange", "purple", "brown", "cyan", "magenta"]
+    unique_datasets = numpy.unique(dataset_names)
+    color_map = {ds: palette[i % len(palette)] for i, ds in enumerate(unique_datasets)}
+
+    for dataset_name in unique_datasets:
+        idx = (dataset_names == dataset_name)
+
+        perf = performances[idx]
+        metric = metrics[idx]
+
+        q_low = numpy.quantile(perf, quantiles[0])
+        q_high = numpy.quantile(perf, quantiles[1])
+
+        low = perf <= q_low
+        high = perf >= q_high
+
+        color = color_map[dataset_name]
+
+        if low.any():
+            axis.plot(metric[low].mean(axis=0), linestyle="--", linewidth=2, c=color, label=f"{dataset_name} (q={quantiles[0]} perf)")
+
+        if high.any():
+            axis.plot(metric[high].mean(axis=0), linestyle="-", linewidth=2, c=color, label=f"{dataset_name} (q={quantiles[1]} perf)")
+
+    axis.set_xlabel("layer index")
+    axis.set_ylabel(metric_name)
+    axis.set_title(f"structural profile: {metric_name}")
+
+    if y_limits != (None, None):
+        axis.set_ylim(*y_limits)
+
+    axis.legend()
+    figure.tight_layout()
+
+    return figure
+
+def save_figure(figure: plt.Figure, folder: str = "", name: str = "") -> None:
     pathlib.Path(f"data/network_analysis/plots/{folder_name}").mkdir(parents=True, exist_ok=True)
-    x_field_name = "accuracy"
-
-    # scan for fields
-    accessor_map = build_accessor_map(statistics[0][0]["metrics"])
-
-    # plot for all fields treated as y
-    cmap = plt.get_cmap("tab10")
-    for y_field_name, accessor in accessor_map.items():
-        for i, dataset in enumerate(statistics):
-            x = [x[x_field_name] for x in dataset]
-            y = [accessor(x["metrics"]) for x in dataset]
-            plt.scatter(x, y, color=cmap(i), label=f"dataset_{i}")
-
-        plt.xlabel(x_field_name)
-        plt.ylabel(y_field_name)
-        plt.grid(True)
-        plt.legend()
-
-        plt.savefig(f"data/network_analysis/plots/{folder_name}/{x_field_name}_vs_{y_field_name}.png", dpi=300, bbox_inches="tight")
-        plt.close()
-
-def measure_correlation(statistics: List[dict], folder_name: str = "none") -> None:
-
-    # gather x axis
-    x_field_name = "accuracy"
-    x = [x[x_field_name] for x in statistics]
-
-    # scan for fields
-    accessor_map = build_accessor_map(statistics[0]["metrics"])
-
-    print(f"------------------------------- {folder_name} -------------------------------")
-
-    field_names = []
-    correlations = []
-    p_values = []
-
-    for y_field_name, accessor in accessor_map.items():
-        y = [accessor(x["metrics"]) for x in statistics]
-        result = scipy.stats.spearmanr(y, x)
-
-        if numpy.isfinite(result.pvalue):
-            field_names.append(y_field_name)
-            correlations.append(result.correlation)
-            p_values.append(float(result.pvalue))
-
-    # for (field_name, correlation, p_value) in zip(field_names, correlations, p_values):
-    #     print(f"{field_name}: {p_value} {correlation}")
-
-    reject, p_adj, _, _ = multipletests(p_values, alpha=0.05, method="fdr_bh")
-
-    for (field_name, correlation, rejected, p_value) in zip(field_names, correlations, reject, p_adj):
-        if rejected:
-            print(f"{field_name}: {p_value} {correlation}")
-
-def global_statistics(graph: Graph, vertex_property, layer_sizes: list, connected_only: bool = False) -> dict:
-    layer_start = 0
-
-    values = []
-    for layer_size in layer_sizes:
-        for vertex_index in range(layer_start, layer_start + layer_size):
-            vertex = graph.vertex(vertex_index)
-
-            if connected_only and (vertex.in_degree() == 0 and vertex.out_degree() == 0):
-                continue
-
-            values.append(vertex_property[vertex])
-        layer_start += layer_size
-    values = numpy.array(values)
-
-    return {
-        'mean': float(values.mean()),
-        'std': float(values.std()),
-        'median': float(numpy.median(values)),
-        'min': float(numpy.min(values)),
-        'max': float(numpy.max(values))
-    }
-
-def local_statistics(graph: Graph, vertex_property, layer_sizes: list, connected_only: bool = False) -> List[dict]:
-    layer_start = 0
-    local_stats = []
-
-    for layer_size in layer_sizes:
-
-        layer_values = []
-        for vertex_index in range(layer_start, layer_start + layer_size):
-            vertex = graph.vertex(vertex_index)
-
-            if connected_only and (vertex.in_degree() == 0 and vertex.out_degree() == 0):
-                continue
-
-            layer_values.append(vertex_property[vertex])
-        layer_values = numpy.array(layer_values)
-
-        local_stats.append({
-            'mean': float(layer_values.mean()),
-            'std': float(layer_values.std()),
-            'median': float(numpy.median(layer_values)),
-            'min': float(numpy.min(layer_values)),
-            'max': float(numpy.max(layer_values))
-        })
-
-        layer_start += layer_size
-
-    return local_stats
-
-
-
-
-
-
+    figure.savefig(f"data/network_analysis/plots/{folder_name}/{name}", dpi=300)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
@@ -241,7 +193,7 @@ if __name__ == "__main__":
         pathlib.Path(f"data/network_analysis/statistics/{folder_name}").mkdir(parents=True, exist_ok=True)
 
         dataset = []
-        if statistics_path.exists(): # did we already process this data once?
+        if False and statistics_path.exists(): # did we already process this data once?
             with open(statistics_path) as f:
                 dataset = json.load(f)
         else: # no we process it for the first time
@@ -258,8 +210,13 @@ if __name__ == "__main__":
                 for (level, value) in training_utilities.top_k_accuracy(model, test_loader, device, [1]).items():
                     data["accuracy"] = value
 
-                def derive_statistics(graph: graph_tool.Graph, neuron_counts: List[int]) -> dict:
-                    return {
+                def derive_metrics(graph: graph_tool.Graph, neuron_counts: List[int], mask: Union[numpy.ndarray, None]) -> dict:
+
+                    if mask is not None:
+                        original_neuron_counts = neuron_counts
+                        graph, neuron_counts = graph_utilities.operations.extract_from_mask(graph, neuron_counts, mask)
+
+                    metrics = {
                         "neurons": [i for i in range(sum(neuron_counts))],
                         "layer_neurons": neuron_counts,
                         "in_degree": graph.degree_property_map("in").get_array().tolist(),
@@ -268,31 +225,47 @@ if __name__ == "__main__":
                         "pagerank": graph_tool.centrality.pagerank(graph).get_array().tolist(),
                         "betweenness": graph_tool.centrality.betweenness(graph)[0].get_array().tolist(),
                         "katz_centrality": graph_tool.centrality.katz(graph).get_array().tolist(),
-                        "k_core": graph_tool.topology.kcore_decomposition(graph).get_array().tolist()
+                        "k_core": graph_tool.topology.kcore_decomposition(graph).get_array().tolist(),
+                        "global": {},
+                        "local": {}
                     }
 
-                # convert network and compute its statistics
-                current_graph, current_neuron_counts = graph.operations.convert_to_graph(model)
-                data["full"] = derive_statistics(current_graph, current_neuron_counts)
+                    # compute summary statistics
+                    # TODO mean, std, median, quantiles
 
-                _current_graph, _current_neuron_counts = graph.operations.extract_input_reachable(current_graph, current_neuron_counts)
-                data["forward"] = derive_statistics(_current_graph, _current_neuron_counts)
+                    if mask is not None:
+                        # store mask
+                        metrics["mask"] = mask.tolist()
 
-                _current_graph, _current_neuron_counts = graph.operations.extract_output_reachable(current_graph, current_neuron_counts)
-                data["backward"] = derive_statistics(_current_graph, _current_neuron_counts)
+                        # compute and store path participation mass
+                        metrics["global"]["ppm"] = numpy.mean(mask)
+                        metrics["local"]["ppm"] = graph_utilities.operations.per_layer(original_neuron_counts, mask, numpy.mean)
 
-                _current_graph, _current_neuron_counts = graph.operations.extract_functional_core(current_graph, current_neuron_counts)
-                data["functional"] = derive_statistics(_current_graph, _current_neuron_counts)
+                    return metrics
+
+                # convert network and compute its metrics
+                graph, neuron_counts = graph_utilities.operations.convert_to_graph(model)
+                data["full"] = derive_metrics(graph, neuron_counts, None)
+                data["forward"] = derive_metrics(graph, neuron_counts, graph_utilities.operations.reachable_from_input(graph, neuron_counts))
+                data["backward"] = derive_metrics(graph, neuron_counts, graph_utilities.operations.reachable_from_output(graph, neuron_counts))
+                data["functional"] = derive_metrics(graph, neuron_counts, graph_utilities.operations.functional_core(graph, neuron_counts))
 
                 dataset.append(data)
 
-            with open(statistics_path, "w") as f:
-                json.dump(dataset, f)
+            # with open(statistics_path, "w") as f:
+            #     json.dump(dataset, f)
 
         dataset.sort(key=lambda x: x["accuracy"], reverse=True)
         all_statistics.append(dataset)
         settings.SingletonMeta._instances.pop(settings.Settings, None)
 
+    # generate plots
     if len(all_statistics):
-        pass
-        # TODO plot statistics
+
+        # path participation mass
+        local_ppm, accuracy, names = extract_metrics(all_statistics, [lambda x: x["functional"]["local"]["ppm"], lambda x: x["accuracy"]])
+        figure = layerwise_profile(local_ppm, accuracy, names, "path participation mass", quantiles = (0.25, 0.75), y_limits = (None, None))
+        save_figure(figure, folder=folder_name, name="path_participation_mass.png")
+
+
+
