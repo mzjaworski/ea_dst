@@ -54,8 +54,11 @@ class FlowRegrowth(Regrowth):
             raise RuntimeError("Unsupported flow shape!")
 
         # invert neighbor flow: low-flow regions get higher probability
-        probs = 1.0 / (scores + 1e-12)
-        probs = probs / probs.sum()
+        if torch.any(scores != 0):
+            probs = scores #1.0 / (scores + 1e-12)
+            probs = probs / probs.sum()
+        else:
+            probs = torch.full_like(scores, 1.0 / scores.numel())
 
         # sample edges to regrow
         grow_idx = inactive_idx[torch.multinomial(probs, min(pruned_count, inactive_idx.numel()), replacement=False)]
