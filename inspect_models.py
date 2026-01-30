@@ -85,8 +85,8 @@ def extract_metrics(datasets: List[List[dict]], accessors: List[Callable[[dict],
             for dataset_index, dataset in enumerate(datasets):
                 for entry_index, entry in enumerate(dataset):
                     results[accessor_index].append(accessor(entry))
-        except:
-            pass #
+        except Exception as e:
+            print(e)
 
     # generate default labels
     results.append([f"dataset_{dataset_index}" for dataset_index, dataset in enumerate(datasets) for entry in dataset])
@@ -162,9 +162,53 @@ def layerwise_profile(metrics: List[List[float]], performances: List[float], dat
     return figure
 
 def save_figure(figure: plt.Figure, folder: str = "", name: str = "") -> None:
-    pathlib.Path(f"data/network_analysis/plots/{folder_name}").mkdir(parents=True, exist_ok=True)
-    figure.savefig(f"data/network_analysis/plots/{folder_name}/{name}", dpi=300)
+    pathlib.Path(f"data/network_analysis/plots/{folder}").mkdir(parents=True, exist_ok=True)
+    figure.savefig(f"data/network_analysis/plots/{folder}/{name}", dpi=300)
     plt.close(figure)
+
+def generate_histogram(metric: List[Union[int, float]], names: List[str], x_label: str, y_label: str, title: str) -> plt.Figure:
+    flattened_values = numpy.concatenate(metric)
+    dataset_names = numpy.array(names)
+
+    vmin = numpy.min(flattened_values)
+    vmax = numpy.max(flattened_values)
+
+    # check if data is float or int
+    if numpy.all(numpy.equal(flattened_values, numpy.floor(flattened_values))):
+        bins = numpy.arange(vmin, vmax + 2)
+    else:
+        bins = numpy.linspace(vmin, vmax, 51)
+
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    bin_width = bins[1] - bins[0]
+
+    figure, axis = plt.subplots(figsize=(8, 5))
+
+    palette = ["red", "blue", "green", "orange", "purple", "brown", "cyan", "magenta"]
+    unique_datasets = numpy.unique(dataset_names)
+    color_map = {ds: palette[i % len(palette)] for i, ds in enumerate(unique_datasets)}
+
+    for dataset_name in unique_datasets:
+        indices = [i for i, m in enumerate(dataset_names == dataset_name) if m]
+
+        values = []
+        for index in indices:
+            values.append(metric[index])
+
+        histograms = numpy.array([numpy.histogram(sub, bins=bins, density=True)[0] for sub in values])
+        avg_hist = histograms.mean(axis=0)
+        avg_hist /= (avg_hist.sum() * bin_width)
+
+        axis.bar(bin_centers, avg_hist, width=bin_width, alpha=0.6, color=color_map[dataset_name], edgecolor='black', label=f"{dataset_name}")
+    axis.set_title(f"histogram: {title}")
+
+    axis.set_xlabel(x_label)
+    axis.set_ylabel(y_label)
+
+    axis.grid(True)
+    axis.legend()
+
+    return figure
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
@@ -242,15 +286,17 @@ if __name__ == "__main__":
                         graph, neuron_counts = graph_utilities.operations.extract_from_mask(graph, neuron_counts, mask)
 
                     metrics = {
-                        "neurons": [i for i in range(sum(neuron_counts))],
-                        "layer_neurons": neuron_counts,
-                        "in_degree": graph.degree_property_map("in").get_array().tolist(),
-                        "out_degree": graph.degree_property_map("out").get_array().tolist(),
-                        "total_degree": graph.degree_property_map("total").get_array().tolist(),
-                        "pagerank": graph_tool.centrality.pagerank(graph).get_array().tolist(),
-                        "betweenness": graph_tool.centrality.betweenness(graph)[0].get_array().tolist(),
-                        "katz_centrality": graph_tool.centrality.katz(graph).get_array().tolist(),
-                        "k_core": graph_tool.topology.kcore_decomposition(graph).get_array().tolist(),
+                        "raw": {
+                            "neurons": [i for i in range(sum(neuron_counts))],
+                            "layer_neurons": neuron_counts,
+                            "in_degree": graph.degree_property_map("in").get_array().tolist(),
+                            "out_degree": graph.degree_property_map("out").get_array().tolist(),
+                            "total_degree": graph.degree_property_map("total").get_array().tolist(),
+                            "pagerank": graph_tool.centrality.pagerank(graph).get_array().tolist(),
+                            "betweenness": graph_tool.centrality.betweenness(graph)[0].get_array().tolist(),
+                            "katz_centrality": graph_tool.centrality.katz(graph).get_array().tolist(),
+                            "k_core": graph_tool.topology.kcore_decomposition(graph).get_array().tolist(),
+                        },
                         "global": {},
                         "local": {}
                     }
@@ -258,18 +304,18 @@ if __name__ == "__main__":
                     # compute summary statistics
                     for metric_name in ["in_degree", "out_degree", "total_degree", "pagerank", "betweenness", "katz_centrality", "k_core"]:
                         metrics["global"][metric_name] = {
-                            "mean": numpy.mean(metrics[metric_name]),
-                            "median": numpy.median(metrics[metric_name]),
-                            "std": numpy.std(metrics[metric_name]),
-                            "min": numpy.min(metrics[metric_name]),
-                            "max": numpy.max(metrics[metric_name])
+                            "mean": numpy.mean(metrics["raw"][metric_name]),
+                            "median": numpy.median(metrics["raw"][metric_name]),
+                            "std": numpy.std(metrics["raw"][metric_name]),
+                            "min": numpy.min(metrics["raw"][metric_name]),
+                            "max": numpy.max(metrics["raw"][metric_name])
                         }
                         metrics["local"][metric_name] = {
-                            "mean": graph_utilities.operations.per_layer(neuron_counts, metrics[metric_name], numpy.mean),
-                            "median": graph_utilities.operations.per_layer(neuron_counts, metrics[metric_name], numpy.median),
-                            "std": graph_utilities.operations.per_layer(neuron_counts, metrics[metric_name], numpy.std),
-                            "min": graph_utilities.operations.per_layer(neuron_counts, metrics[metric_name], numpy.min),
-                            "max": graph_utilities.operations.per_layer(neuron_counts, metrics[metric_name], numpy.max)
+                            "mean": graph_utilities.operations.per_layer(neuron_counts, metrics["raw"][metric_name], numpy.mean),
+                            "median": graph_utilities.operations.per_layer(neuron_counts, metrics["raw"][metric_name], numpy.median),
+                            "std": graph_utilities.operations.per_layer(neuron_counts, metrics["raw"][metric_name], numpy.std),
+                            "min": graph_utilities.operations.per_layer(neuron_counts, metrics["raw"][metric_name], numpy.min),
+                            "max": graph_utilities.operations.per_layer(neuron_counts, metrics["raw"][metric_name], numpy.max)
                         }
 
                     if mask is not None:
@@ -299,22 +345,35 @@ if __name__ == "__main__":
         settings.SingletonMeta._instances.pop(settings.Settings, None)
 
 
-
-    # generate plots
+    # ------------------------------------------------ generate plots ------------------------------------------------ #
     if len(all_statistics):
+        metrics = ["in_degree", "out_degree", "total_degree", "pagerank", "betweenness", "katz_centrality", "k_core"]
+        statistics = ["mean", "median", "std", "min", "max"]
 
         # global statistics
         x_field = "accuracy"
-        for metric in ["in_degree", "out_degree", "total_degree", "pagerank", "betweenness", "katz_centrality", "k_core"]:
-            for statistic in ["mean", "median", "std", "min", "max"]:
+        for metric in metrics:
+            for statistic in statistics:
                 x, y, names = extract_metrics(all_statistics, [ lambda x: x[x_field], lambda x: x["functional"]["global"][metric][statistic]])
                 figure = scatter_plot(x, y, names, x_label=x_field, y_label=f"{statistic}_{metric}", title=f"{x_field} vs {statistic}_{metric}")
-                save_figure(figure, folder=folder_name, name=f"global_{x_field}_vs_{statistic}_{metric}.png")
+                save_figure(figure, folder=f"{folder_name}/statistics", name=f"global.{x_field}_vs_{statistic}_{metric}.png")
 
         # path participation mass
         local_ppm, accuracy, names = extract_metrics(all_statistics, [lambda x: x["functional"]["local"]["ppm"], lambda x: x["accuracy"]])
         figure = layerwise_profile(local_ppm, accuracy, names, "path participation mass", quantiles = (0.25, 0.75), y_limits = (None, None))
         save_figure(figure, folder=folder_name, name="path_participation_mass.png")
 
+        # histograms
+        for metric in metrics:
 
+            # global
+            statistics, names = extract_metrics(all_statistics,[lambda x: x["full"]["raw"][metric]])
+            figure = generate_histogram(statistics, names, x_label=metric, y_label="frequency", title=f"{metric} frequency")
+            save_figure(figure, folder=f"{folder_name}/histograms", name=f"full.global.{metric}.png")
+
+            # local
+            for index in range(len(all_statistics[0][0]["full"]["raw"]["layer_neurons"])): # a bit hacky but works
+                statistics, names = extract_metrics(all_statistics, [lambda x: graph_utilities.operations.per_layer(x["full"]["raw"]["layer_neurons"], x["full"]["raw"][metric], lambda x: x)[index]])
+                figure = generate_histogram(statistics, names, x_label=metric, y_label="frequency", title=f"{metric} frequency")
+                save_figure(figure, folder=f"{folder_name}/histograms", name=f"full.local.{index}.{metric}.png")
 
