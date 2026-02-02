@@ -31,7 +31,7 @@ class NullPruning(Pruning):
     def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
         pass
 
-class FlowPruning(Pruning):
+class DirectedFlowPruning(Pruning):
 
     def __init__(self, pruned_fraction: float, decay_rate: float):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
@@ -40,105 +40,43 @@ class FlowPruning(Pruning):
         self._pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
 
-    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
-        original_mask = layer.mask.data
-        original_flow = layer.flow.data
+    def apply(self, layer):
 
+        forward_flow = layer.forward_flow.data
+        backward_flow = layer.backward_flow.data
+
+        original_mask = layer.mask.data
         flat_mask = original_mask.view(-1)
-        flat_flow = original_flow.view(-1)
 
         # identify active weights
-        active_idx = (flat_mask == 1).nonzero(as_tuple=True)[0]
-        total_active = active_idx.numel()
+        active_indices = (flat_mask == 1).nonzero(as_tuple=True)[0]
+        total_active = active_indices.numel()
         if total_active == 0:
             return 0, layer
 
         # identify number of weights to remove
         pruned_count = max(int(self._pruned_fraction * total_active), 1)
 
+        # compute normalized flow
+        flat_forward_flow = forward_flow.view(-1)[active_indices]
+        flat_backward_flow = backward_flow.view(-1)[active_indices]
+
+        flat_f_norm = flat_forward_flow / (flat_forward_flow.max() + 1e-12)
+        flat_b_norm = flat_backward_flow / (flat_backward_flow.max() + 1e-12)
+
         # select weights to remove
-        scores = flat_flow[active_idx]
+        scores = flat_f_norm * flat_b_norm
         magnitudes, order = torch.sort(scores, descending=False)
         sel_mask = src.utilities.soft_top_k(magnitudes, select=pruned_count, decay_rate=self.decay_rate)
 
         # retrieve their indices
-        sorted_idx = active_idx[order]
+        sorted_idx = active_indices[order]
         to_prune = sorted_idx[sel_mask]
         num_pruned = to_prune.numel()
 
         # remove selected weights
         flat_mask[to_prune] = 0
         layer.mask.data = flat_mask.view_as(original_mask)
-
-        return num_pruned, layer
-
-    def pruned_fraction(self) -> float:
-        return self._pruned_fraction
-
-    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
-        self._pruned_fraction = strategy.decay(self._pruned_fraction)
-
-class FlowPruning2(Pruning):
-
-    def __init__(self, pruned_fraction: float, entrenchment_penalty: float):
-        if pruned_fraction < 0.0 or pruned_fraction > 1.0:
-            raise ValueError("pruned_fraction must be in [0.0, 1.0]")
-
-        self._pruned_fraction = pruned_fraction
-        self.entrenchment_penalty = entrenchment_penalty  # used as λ (entrenchment penalty)
-
-    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
-
-        mask = layer.mask.data
-        flow = layer.flow.data
-        persistence = layer.persistence.data
-
-        flat_mask = mask.view(-1)
-        flat_flow = flow.view(-1)
-        flat_persist = persistence.view(-1)
-
-        # active edges
-        active_idx = (flat_mask == 1).nonzero(as_tuple=True)[0]
-        total_active = active_idx.numel()
-        if total_active == 0:
-            return 0, layer
-
-        # number to prune
-        pruned_count = max(int(self._pruned_fraction * total_active), 1)
-
-        # --- exposure-aware pruning score ---
-        # score = flow / (1 + λ * persistence)
-        scores = flat_flow[active_idx] #/ (1.0 + self.entrenchment_penalty * flat_persist[active_idx])
-
-        # print(f"persistence - mean: {flat_persist[active_idx].mean().cpu().item():.3f}")
-        # print(f"score - min: {scores.min().cpu().item()}, max: {scores.max().cpu().item()}, mean: {scores.mean().cpu().item()}")
-
-        # sort ascending (lowest score pruned first)
-        sorted_scores, order = torch.sort(scores, descending=False)
-
-        # soft selection (keeps your existing stochasticity)
-        sel_mask = src.utilities.soft_top_k(sorted_scores, select=pruned_count, decay_rate=None)
-
-        sorted_idx = active_idx[order]
-        to_prune = sorted_idx[sel_mask]
-        num_pruned = to_prune.numel()
-
-        if num_pruned == 0:
-            return 0, layer
-
-        # --- apply pruning ---
-        flat_mask[to_prune] = 0
-
-        # reset persistence of pruned edges
-        flat_persist[to_prune] = 0
-
-        # increment persistence of surviving active edges
-        survivors = active_idx[~sel_mask]
-        flat_persist[survivors] += 1
-
-        # write back
-        layer.mask.data = flat_mask.view_as(mask)
-        layer.persistence.data = flat_persist.view_as(persistence)
 
         return num_pruned, layer
 

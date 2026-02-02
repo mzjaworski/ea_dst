@@ -18,6 +18,14 @@ import argparse
 import random
 import sys
 
+import graph_utilities.operations
+
+def compute_reachability(model: torch.nn.Module) -> torch.nn.Module:
+    graph, total_neurons = graph_utilities.operations.convert_to_graph(model)
+    _, core_neurons = graph_utilities.operations.extract_functional_core(graph, total_neurons)
+    model.reachability = float(numpy.mean([reachable / total for (reachable, total) in zip(core_neurons, total_neurons)]))
+    return model
+
 def stage_budgets(total_budget: int, num_children: int, keep: float) -> List[int]:
     S = int(math.floor(math.log(num_children, 1.0 / keep)))
     weights = [(1.0 / keep) ** s for s in range(S)]
@@ -81,50 +89,50 @@ def collect_masks(model):
 
     return torch.cat(mask_chunks, dim=0)
 
-# magnitude based ordering
-def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
-    loss = numpy.array([c.composite_loss for c in candidates])
-    diff = numpy.abs(numpy.diff(loss, axis=1))
-
-    pop_loss = numpy.median(loss, axis=0)
-    pop_diff = numpy.median(diff, axis=0)
-
-    for i, c in enumerate(candidates):
-        level = loss[i][1:] / (pop_loss[1:] + eps)
-        slope = diff[i] / (pop_diff + eps)
-        c.rank = float(numpy.mean(alpha * level + (1.0 - alpha) * slope))
-
-    return candidates
-
-# rank based ordering
+# # magnitude based ordering
 # def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
+#     loss = numpy.array([c.composite_loss for c in candidates])
+#     diff = numpy.abs(numpy.diff(loss, axis=1))
 #
-#     if len(candidates) < 2 or len(candidates[0].composite_loss) < 2:
-#         for c in candidates:
-#             c.rank = 0.0
-#         return candidates
-#
-#     mean_loss = numpy.array([c.composite_loss for c in candidates])
-#     diff_loss = numpy.diff(mean_loss, axis=1)
-#
-#     # align loss with change
-#     mean_loss = mean_loss[:, 1:]
-#
-#     mean_rank = numpy.argsort(numpy.argsort(mean_loss, axis=0), axis=0)
-#     diff_rank = numpy.argsort(numpy.argsort(diff_loss, axis=0), axis=0)
-#
-#     # normalize in [0, 1]
-#     N = len(candidates)
-#     mean_rank = mean_rank / (N - 1 + eps)
-#     diff_rank = diff_rank / (N - 1 + eps)
-#
-#     # combine based on alpha
-#     final_rank = alpha * mean_rank + (1.0 - alpha) * diff_rank
+#     pop_loss = numpy.median(loss, axis=0)
+#     pop_diff = numpy.median(diff, axis=0)
 #
 #     for i, c in enumerate(candidates):
-#         c.rank = float(numpy.mean(final_rank[i]))
+#         level = loss[i][1:] / (pop_loss[1:] + eps)
+#         slope = diff[i] / (pop_diff + eps)
+#         c.rank = float(numpy.mean(alpha * level + (1.0 - alpha) * slope))
 #
 #     return candidates
+
+# rank based ordering
+def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
+
+    if len(candidates) < 2 or len(candidates[0].composite_loss) < 2:
+        for c in candidates:
+            c.rank = 0.0
+        return candidates
+
+    mean_loss = numpy.array([c.composite_loss for c in candidates])
+    diff_loss = numpy.array([[c.reachability] for c in candidates])#numpy.diff(mean_loss, axis=1)
+
+    # align loss with change
+    # mean_loss = mean_loss[:, 1:]
+
+    mean_rank = numpy.argsort(numpy.argsort(mean_loss, axis=0), axis=0)
+    diff_rank = numpy.argsort(numpy.argsort(diff_loss, axis=0), axis=0)
+
+    # normalize in [0, 1]
+    N = len(candidates)
+    mean_rank = mean_rank / (N - 1 + eps)
+    diff_rank = diff_rank / (N - 1 + eps)
+
+    # combine based on alpha
+    final_rank = alpha * mean_rank + (1.0 - alpha) * diff_rank
+
+    for i, c in enumerate(candidates):
+        c.rank = float(numpy.mean(final_rank[i]))
+
+    return candidates
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], decay_strategy: src.rules.decay.DecayStrategy,
@@ -158,15 +166,9 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                 # pick best model
                 if len(children):
-                    children.sort(key=lambda c: float(numpy.mean(c.mean_loss)))
-                    print([(child.index, (lambda c: float(numpy.mean(c.mean_loss)))(child)) for child in children])
-                    children.sort(key=lambda c: float(numpy.mean(c.composite_loss)))
-                    print([(child.index, (lambda c: float(numpy.mean(c.composite_loss)))(child)) for child in children])
-
-
                     children = rank_models(children, alpha=alpha)
                     children.sort(key=fitness_function)
-                    print([(child.index, fitness_function(child)) for child in children])
+                    print([(child.index, fitness_function(child), float(numpy.mean(child.mean_loss)), child.reachability) for child in children])
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
                     statistics["amortized_flops"] += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
                     children = []

@@ -53,9 +53,8 @@ class FlowRegrowth(Regrowth):
         else:
             raise RuntimeError("Unsupported flow shape!")
 
-        # invert neighbor flow: low-flow regions get higher probability
         if torch.any(scores != 0):
-            probs = scores #1.0 / (scores + 1e-12)
+            probs = scores
             probs = probs / probs.sum()
         else:
             probs = torch.full_like(scores, 1.0 / scores.numel())
@@ -139,3 +138,46 @@ class GradientRegrowth(Regrowth):
         layer.layer.weight.data = self.reinitialization(weight.data, grow)
 
         return layer
+
+class GuidedUniformRegrowth(Regrowth):
+
+    def __init__(self, weight_reinitialization: str = "xavier_uniform", guidance_boost: float = 100.0):
+        assert guidance_boost >= 1.0
+        self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
+        self.guidance_boost = guidance_boost
+
+    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
+
+        mask = layer.mask.data
+        guidance = layer.functional_reachability
+
+        flat_mask = mask.view(-1)
+        flat_guidance = guidance.view(-1)
+
+        inactive_idx = (flat_mask == 0).nonzero(as_tuple=True)[0]
+        if inactive_idx.numel() == 0:
+            return layer
+
+        # weights: base = 1, boosted where guidance == True
+        weights = torch.ones(inactive_idx.numel(), device=inactive_idx.device, dtype=torch.float)
+
+        guided = flat_guidance[inactive_idx].bool()
+        weights[guided] *= self.guidance_boost
+
+        # handle pruned_count > available
+        k = min(pruned_count, inactive_idx.numel())
+        # print(weights.min(), weights.max(), torch.sum(weights == weights.min()), torch.sum(weights == weights.max()), k)
+
+        # weighted uniform sampling without replacement
+        sampled = torch.multinomial(weights, k, replacement=False)
+        grow = inactive_idx[sampled]
+
+        # update mask
+        flat_mask[grow] = 1
+        layer.mask.data = flat_mask.view_as(mask)
+
+        # reinitialize grown weights
+        layer.layer.weight.data = self.reinitialization(layer.layer.weight.data, grow)
+
+        return layer
+

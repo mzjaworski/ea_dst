@@ -131,3 +131,25 @@ def per_layer(neuron_counts: list[int], data: numpy.ndarray, metric = numpy.sum)
         start += neuron_count
 
     return results
+
+def edge_reachability(neuron_counts: list[int], forward_mask: numpy.ndarray, backward_mask: numpy.ndarray, operand = numpy.outer) -> List[numpy.ndarray]:
+    assert len(forward_mask) == len(backward_mask)
+    assert sum(neuron_counts) == len(forward_mask)
+
+    result = []
+
+    # first gather all matrices
+    forward_layers = []
+    backward_layers = []
+
+    start = 0
+    for layer_neuron_count in neuron_counts:
+        forward_layers.append(forward_mask[start : start + layer_neuron_count])
+        backward_layers.append(backward_mask[start : start + layer_neuron_count])
+        start += layer_neuron_count
+
+    # now assemble reachability matrices per each layer
+    for layer_index in range(len(forward_layers) - 1):
+        result.append(operand(forward_layers[layer_index + 1], backward_layers[layer_index]))
+
+    return result

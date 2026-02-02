@@ -1,4 +1,5 @@
 from typing import List, Dict, Tuple
+import graph_utilities.operations
 
 import src.rules.warmup
 import src.rules.pruning
@@ -76,14 +77,73 @@ def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
     model.neuron_dormancy = []
     return model
 
+def compute_reachability(model: torch.nn.Module) -> float:
+    graph, total_neurons = graph_utilities.operations.convert_to_graph(model)
+
+    functional_mask = graph_utilities.operations.functional_core(graph, total_neurons)
+    functional_graph, functional_total_neurons = graph_utilities.operations.extract_from_mask(graph, total_neurons, functional_mask)
+
+    functional_reachability = graph_utilities.operations.edge_reachability(total_neurons, functional_mask, functional_mask)
+
+    # collect only custom layers
+    layers = []
+    for layer in model.modules():
+        if not isinstance(layer, src.network.detail.MaskedLayer):
+            continue
+        if not isinstance(layer.layer, torch.nn.Linear):
+            raise RuntimeError("currently only linear layers are supported!")
+        layers.append(layer)
+
+    assert len(functional_reachability) == len(layers)
+
+    edge_overlap = []
+    for (layer, reachability_matrix) in zip(layers, functional_reachability):
+        mask = layer.mask.cpu().numpy()
+        edge_overlap.append(float(numpy.sum(mask.astype(bool) & reachability_matrix.astype(bool)).astype(float) / numpy.sum(mask)))
+    neuron_overlap = [reachable / total for (reachable, total) in zip(functional_total_neurons, total_neurons)]
+
+    print(neuron_overlap, edge_overlap)
+    return float(numpy.mean(edge_overlap))
+
+def attach_reachabilities(model: torch.nn.Module) -> torch.nn.Module:
+    graph, total_neurons = graph_utilities.operations.convert_to_graph(model)
+
+    forward_mask = graph_utilities.operations.reachable_from_input(graph, total_neurons)
+    backward_mask = graph_utilities.operations.reachable_from_output(graph, total_neurons)
+
+    backward_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=backward_mask, backward_mask=backward_mask)
+    functional_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=backward_mask, backward_mask=forward_mask)
+
+    # collect only custom layers
+    layers = []
+    for layer in model.modules():
+        if not isinstance(layer, src.network.detail.MaskedLayer):
+            continue
+        if not isinstance(layer.layer, torch.nn.Linear):
+            raise RuntimeError("currently only linear layers are supported!")
+        layers.append(layer)
+
+    assert len(backward_reachabilities) == len(layers)
+
+    for (layer, backward_reachability, functional_reachability) in zip(layers, backward_reachabilities, functional_reachabilities):
+        layer.backward_reachability.copy_(torch.from_numpy(backward_reachability).to(layer.layer.weight.device))
+        layer.functional_reachability.copy_(torch.from_numpy(functional_reachability).to(layer.layer.weight.device))
+
+    return model
+
 # instantiates network with all statistics to track
 def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device) -> torch.nn.Module:
     model = model_factory().to(device)
 
     if parent is not None:
-        model.load_state_dict(parent.state_dict())
+        model.load_state_dict(parent.state_dict(), strict=False)
 
+    model = attach_reachabilities(model)
     model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
+
+    model = attach_reachabilities(model)
+    model.reachability = 1.0 - compute_reachability(model)
+
     model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
     model = reset_tracked_fields(model)
 

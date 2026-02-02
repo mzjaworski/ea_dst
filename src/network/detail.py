@@ -64,8 +64,11 @@ class MaskedLayer(torch.nn.Module):
         self.mask = torch.nn.Parameter(torch.ones_like(layer.weight), requires_grad=False)
 
         # used to compute flow going through node
-        self.register_buffer('flow', torch.zeros_like(layer.weight))
-        self.register_buffer('persistence', torch.zeros_like(layer.weight))
+        self.register_buffer('forward_flow', torch.zeros_like(layer.weight))
+
+        self.register_buffer('backward_flow', torch.zeros_like(layer.weight))
+        self.register_buffer('backward_reachability', torch.zeros_like(layer.weight))
+        self.register_buffer('functional_reachability', torch.zeros_like(layer.weight))
 
         self._activation = None
 
@@ -139,10 +142,12 @@ class MaskedLayer(torch.nn.Module):
         else:
             raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
-        self.flow += grad * (act.mean(dim=dim, keepdim=True) * weight) * mask
+        self.forward_flow += (act.mean(dim=dim, keepdim=True) * weight) * mask
+        self.backward_flow += (grad * weight) * self.backward_reachability * mask
 
     def reset_flow(self) -> None:
-        self.flow.zero_()
+        self.forward_flow.zero_()
+        self.backward_flow.zero_()
 
 class NetworkInterface(torch.nn.Module, ABC):
 
