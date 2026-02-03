@@ -52,7 +52,6 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                     # not assigning back should be safe as we deal with references
 
             layer.reset_flow()  # set flow to zero
-            # print(layer.realized_sparsity())
 
     return model
 
@@ -111,7 +110,8 @@ def attach_reachabilities(model: torch.nn.Module) -> torch.nn.Module:
     forward_mask = graph_utilities.operations.reachable_from_input(graph, total_neurons)
     backward_mask = graph_utilities.operations.reachable_from_output(graph, total_neurons)
 
-    backward_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=backward_mask, backward_mask=backward_mask)
+    backward_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=numpy.ones_like(backward_mask), backward_mask=backward_mask)
+    forward_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=forward_mask, backward_mask=numpy.ones_like(forward_mask))
     functional_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=backward_mask, backward_mask=forward_mask)
 
     # collect only custom layers
@@ -125,8 +125,9 @@ def attach_reachabilities(model: torch.nn.Module) -> torch.nn.Module:
 
     assert len(backward_reachabilities) == len(layers)
 
-    for (layer, backward_reachability, functional_reachability) in zip(layers, backward_reachabilities, functional_reachabilities):
+    for (layer, backward_reachability, forward_reachability, functional_reachability) in zip(layers, backward_reachabilities, forward_reachabilities, functional_reachabilities):
         layer.backward_reachability.copy_(torch.from_numpy(backward_reachability).to(layer.layer.weight.device))
+        layer.forward_reachability.copy_(torch.from_numpy(forward_reachability).to(layer.layer.weight.device))
         layer.functional_reachability.copy_(torch.from_numpy(functional_reachability).to(layer.layer.weight.device))
 
     return model

@@ -64,10 +64,11 @@ class MaskedLayer(torch.nn.Module):
         self.mask = torch.nn.Parameter(torch.ones_like(layer.weight), requires_grad=False)
 
         # used to compute flow going through node
+        self.register_buffer('forward_reachability', torch.zeros_like(layer.weight))
         self.register_buffer('forward_flow', torch.zeros_like(layer.weight))
-
-        self.register_buffer('backward_flow', torch.zeros_like(layer.weight))
         self.register_buffer('backward_reachability', torch.zeros_like(layer.weight))
+        self.register_buffer('backward_flow', torch.zeros_like(layer.weight))
+
         self.register_buffer('functional_reachability', torch.zeros_like(layer.weight))
 
         self._activation = None
@@ -142,8 +143,25 @@ class MaskedLayer(torch.nn.Module):
         else:
             raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
 
-        self.forward_flow += (act.mean(dim=dim, keepdim=True) * weight) * mask
+        self.forward_flow += (act.mean(dim=dim, keepdim=True) * weight) * self.forward_reachability * mask
         self.backward_flow += (grad * weight) * self.backward_reachability * mask
+
+    # llm generated
+    def get_node_flow(self) -> torch.Tensor:
+
+        if self.forward_flow is None or self.backward_flow is None:
+            raise RuntimeError("forward_flow or backward_flow not initialized.")
+
+        edge_flow = self.forward_flow * self.backward_flow
+
+        if isinstance(self.layer, torch.nn.Linear):
+            node_flow = edge_flow.sum(dim=1)
+        elif isinstance(self.layer, torch.nn.Conv2d):
+            node_flow = edge_flow.sum(dim=(1, 2, 3))
+        else:
+            raise RuntimeError(f"Unsupported layer type: {type(self.layer)} in get_node_flow!")
+
+        return node_flow[node_flow > 0] # return flow only for active neurons
 
     def reset_flow(self) -> None:
         self.forward_flow.zero_()
@@ -170,3 +188,9 @@ class NetworkInterface(torch.nn.Module, ABC):
             for layer in self.modules():
                 if isinstance(layer, MaskedLayer):
                     layer.reset_flow()
+
+    def flow_entropy(self) -> float:
+        casual_mass = torch.cat([layer.get_node_flow() for layer in self.modules() if isinstance(layer, MaskedLayer)])
+        p = casual_mass / (casual_mass.sum() + 1e-12)
+        node_entropy = -(p * p.log()).sum()
+        return float(node_entropy.cpu() / (torch.log(torch.tensor(casual_mass.numel())) + 1e-12).item())

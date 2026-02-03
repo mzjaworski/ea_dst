@@ -153,3 +153,36 @@ def edge_reachability(neuron_counts: list[int], forward_mask: numpy.ndarray, bac
         result.append(operand(forward_layers[layer_index + 1], backward_layers[layer_index]))
 
     return result
+
+
+# llm generated
+def draw_layered_graph(graph: Graph, total_neurons: list[int], filename: str, width: int = 8000, height: int = 6000, margin: float = 100.0, vertex_size: float = 12, edge_pen_width: float = 1.0):
+    g = Graph(directed=graph.is_directed())
+
+    vertex_map = {v: g.add_vertex() for v in graph.vertices()}
+    for e in graph.edges():
+        g.add_edge(vertex_map[e.source()], vertex_map[e.target()])
+
+    pos = g.new_vertex_property("vector<double>")
+
+    n_layers = len(total_neurons)
+    if n_layers == 1:
+        x_spacing = width - 2 * margin
+    else:
+        x_spacing = (width - 2 * margin) / (n_layers - 1)
+
+    vertices = list(g.vertices())
+    v_idx = 0
+    for layer_idx, n in enumerate(total_neurons):
+        x = margin + layer_idx * x_spacing
+        if n == 1:
+            y_spacing = 0
+        else:
+            y_spacing = (height - 2 * margin) / (n - 1)
+
+        y0 = (height - (n - 1) * y_spacing) / 2
+        for j in range(n):
+            pos[vertices[v_idx]] = (x, y0 + j * y_spacing)
+            v_idx += 1
+
+    graph_draw(g, pos=pos, vertex_size=vertex_size, edge_pen_width=edge_pen_width, output_size=(width, height), output=filename)
