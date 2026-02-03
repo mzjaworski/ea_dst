@@ -132,7 +132,7 @@ def per_layer(neuron_counts: list[int], data: numpy.ndarray, metric = numpy.sum)
 
     return results
 
-def edge_reachability(neuron_counts: list[int], forward_mask: numpy.ndarray, backward_mask: numpy.ndarray, operand = numpy.outer) -> List[numpy.ndarray]:
+def interlayer_connectivity(neuron_counts: list[int], forward_mask: numpy.ndarray, backward_mask: numpy.ndarray, operand = numpy.outer) -> List[numpy.ndarray]:
     assert len(forward_mask) == len(backward_mask)
     assert sum(neuron_counts) == len(forward_mask)
 
@@ -154,9 +154,29 @@ def edge_reachability(neuron_counts: list[int], forward_mask: numpy.ndarray, bac
 
     return result
 
+def edge_reachability(model: torch.nn.Module, edge_connectivity: List[numpy.ndarray]) -> List[int]:
+
+    # collect only custom layers
+    layers = []
+    for layer in model.modules():
+        if not isinstance(layer, src.network.detail.MaskedLayer):
+            continue
+        if not isinstance(layer.layer, torch.nn.Linear):
+            raise RuntimeError("currently only linear layers are supported!")
+        layers.append(layer)
+
+    assert len(edge_connectivity) == len(layers)
+
+    # compute overlap between supplied theoretical edge connectivity and actual network
+    edge_overlap = []
+    for (layer, connectivity_matrix) in zip(layers, edge_connectivity):
+        mask = layer.mask.cpu().numpy()
+        edge_overlap.append(float(numpy.sum(mask.astype(bool) & connectivity_matrix.astype(bool)).astype(float) / numpy.sum(mask)))
+
+    return edge_overlap
 
 # llm generated
-def draw_layered_graph(graph: Graph, total_neurons: list[int], filename: str, width: int = 8000, height: int = 6000, margin: float = 100.0, vertex_size: float = 12, edge_pen_width: float = 1.0):
+def draw_layered_graph(graph: Graph, neuron_counts: list[int], filename: str, width: int = 8000, height: int = 6000, margin: float = 100.0, vertex_size: float = 12, edge_pen_width: float = 1.0):
     g = Graph(directed=graph.is_directed())
 
     vertex_map = {v: g.add_vertex() for v in graph.vertices()}
@@ -165,7 +185,7 @@ def draw_layered_graph(graph: Graph, total_neurons: list[int], filename: str, wi
 
     pos = g.new_vertex_property("vector<double>")
 
-    n_layers = len(total_neurons)
+    n_layers = len(neuron_counts)
     if n_layers == 1:
         x_spacing = width - 2 * margin
     else:
@@ -173,7 +193,7 @@ def draw_layered_graph(graph: Graph, total_neurons: list[int], filename: str, wi
 
     vertices = list(g.vertices())
     v_idx = 0
-    for layer_idx, n in enumerate(total_neurons):
+    for layer_idx, n in enumerate(neuron_counts):
         x = margin + layer_idx * x_spacing
         if n == 1:
             y_spacing = 0

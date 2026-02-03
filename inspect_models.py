@@ -358,6 +358,10 @@ if __name__ == "__main__":
                         "local": {}
                     }
 
+                    if mask is not None:
+                        functional_reachability = graph_utilities.operations.interlayer_connectivity(original_neuron_counts, mask, mask)
+                        metrics["raw"]["edge_overlap"] = graph_utilities.operations.edge_reachability(model, functional_reachability)
+
                     # compute summary statistics
                     for metric_name in ["in_degree", "out_degree", "total_degree", "pagerank", "betweenness", "katz_centrality", "k_core"]:
                         metrics["global"][metric_name] = {
@@ -424,7 +428,23 @@ if __name__ == "__main__":
         full, forward, backward, functional, names = extract_metrics(all_statistics, [lambda x: x["full"]["raw"]["layer_neurons"], lambda x: x["forward"]["raw"]["layer_neurons"], lambda x: x["backward"]["raw"]["layer_neurons"], lambda x: x["functional"]["raw"]["layer_neurons"]])
         figures = stacked_bar_plots([full, forward, backward, functional], ["full", "forward", "backward", "functional"], names)
         for (figure, name) in zip(figures, numpy.unique(numpy.array(names))):
-            save_figure(figure, folder=f"{folder_name}/bar_plots", name=f"layer_naurons.{name}.png")
+            save_figure(figure, folder=f"{folder_name}/bar_plots", name=f"neuron_reachability.{name}.png")
+
+        # normalized connected neuron distributions
+        full = numpy.mean(numpy.array(full), axis=0).tolist()
+        forward = [[(layer_neurons / average_neurons) for (layer_neurons, average_neurons) in zip(fwd_neurons, full)] for fwd_neurons in forward]
+        backward = [[(layer_neurons / average_neurons) for (layer_neurons, average_neurons) in zip(bkd_neurons, full)] for bkd_neurons in backward]
+        functional = [[(layer_neurons / average_neurons) for (layer_neurons, average_neurons) in zip(func_neurons, full)] for func_neurons in functional]
+
+        figures = stacked_bar_plots([forward, backward, functional], ["forward", "backward", "functional"], names)
+        for (figure, name) in zip(figures, numpy.unique(numpy.array(names))):
+            save_figure(figure, folder=f"{folder_name}/bar_plots", name=f"normalized_neuron_reachability.{name}.png")
+
+        # reachable edge distributions
+        forward, backward, functional, names = extract_metrics(all_statistics, [lambda x: x["forward"]["raw"]["edge_overlap"], lambda x: x["backward"]["raw"]["edge_overlap"], lambda x: x["functional"]["raw"]["edge_overlap"]])
+        figures = stacked_bar_plots([forward, backward, functional], ["forward", "backward", "functional"], names)
+        for (figure, name) in zip(figures, numpy.unique(numpy.array(names))):
+            save_figure(figure, folder=f"{folder_name}/bar_plots", name=f"normalized_edge_reachability.{name}.png")
 
         # histograms
         for metric in metrics:

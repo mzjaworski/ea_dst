@@ -78,27 +78,12 @@ def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
 
 def compute_reachability(model: torch.nn.Module) -> float:
     graph, total_neurons = graph_utilities.operations.convert_to_graph(model)
-
     functional_mask = graph_utilities.operations.functional_core(graph, total_neurons)
+
     functional_graph, functional_total_neurons = graph_utilities.operations.extract_from_mask(graph, total_neurons, functional_mask)
+    functional_reachability = graph_utilities.operations.interlayer_connectivity(total_neurons, functional_mask, functional_mask)
 
-    functional_reachability = graph_utilities.operations.edge_reachability(total_neurons, functional_mask, functional_mask)
-
-    # collect only custom layers
-    layers = []
-    for layer in model.modules():
-        if not isinstance(layer, src.network.detail.MaskedLayer):
-            continue
-        if not isinstance(layer.layer, torch.nn.Linear):
-            raise RuntimeError("currently only linear layers are supported!")
-        layers.append(layer)
-
-    assert len(functional_reachability) == len(layers)
-
-    edge_overlap = []
-    for (layer, reachability_matrix) in zip(layers, functional_reachability):
-        mask = layer.mask.cpu().numpy()
-        edge_overlap.append(float(numpy.sum(mask.astype(bool) & reachability_matrix.astype(bool)).astype(float) / numpy.sum(mask)))
+    edge_overlap = graph_utilities.operations.edge_reachability(model, functional_reachability)
     neuron_overlap = [reachable / total for (reachable, total) in zip(functional_total_neurons, total_neurons)]
 
     print(neuron_overlap, edge_overlap)
@@ -110,9 +95,9 @@ def attach_reachabilities(model: torch.nn.Module) -> torch.nn.Module:
     forward_mask = graph_utilities.operations.reachable_from_input(graph, total_neurons)
     backward_mask = graph_utilities.operations.reachable_from_output(graph, total_neurons)
 
-    backward_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=numpy.ones_like(backward_mask), backward_mask=backward_mask)
-    forward_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=forward_mask, backward_mask=numpy.ones_like(forward_mask))
-    functional_reachabilities = graph_utilities.operations.edge_reachability(total_neurons, forward_mask=backward_mask, backward_mask=forward_mask)
+    backward_reachabilities = graph_utilities.operations.interlayer_connectivity(total_neurons, forward_mask=numpy.ones_like(backward_mask), backward_mask=backward_mask)
+    forward_reachabilities = graph_utilities.operations.interlayer_connectivity(total_neurons, forward_mask=forward_mask, backward_mask=numpy.ones_like(forward_mask))
+    functional_reachabilities = graph_utilities.operations.interlayer_connectivity(total_neurons, forward_mask=backward_mask, backward_mask=forward_mask)
 
     # collect only custom layers
     layers = []
