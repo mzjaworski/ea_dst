@@ -1,4 +1,5 @@
 from typing import List, Dict, Tuple
+import graph_utilities.operations
 
 import src.rules.warmup
 import src.rules.pruning
@@ -33,20 +34,24 @@ def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoad
     return {f"acc-top_{k}": 100.0 * correct[k] / total for k in top_k}
 
 # updates network topology according to predefined set of rules
-def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, prunning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth) -> torch.nn.Module:
+def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth]) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
 
     # iterate over all layers
-    for layer in model.modules():
-        # we are interested only in custom MaskedLayers
-        if not isinstance(layer, src.network.detail.MaskedLayer):
-            continue
+    if pruning_strategies is not None and regrowth_strategies is not None:
+        for layer in model.modules():
+            # we are interested only in custom MaskedLayers
+            if not isinstance(layer, src.network.detail.MaskedLayer):
+                continue
 
-        # apply removal/regrowth only for layers that actually require it
-        if layer.expected_sparsity() > 0.0:
-            pruned_count, pruned_layer = prunning_strategy.apply(layer)
-            regrowth_strategy.apply(pruned_count, pruned_layer)
-            # not assigning back should be safe as we deal with references
+            # apply removal/regrowth only for layers that actually require it
+            if layer.realized_sparsity() < 1.0:
+                for (prunning_strategy, regrowth_strategy) in zip(pruning_strategies, regrowth_strategies):
+                    pruned_count, pruned_layer = prunning_strategy.apply(layer)
+                    regrowth_strategy.apply(pruned_count, pruned_layer)
+                    # not assigning back should be safe as we deal with references
+
+            layer.reset_flow()  # set flow to zero
 
     return model
 
@@ -64,22 +69,68 @@ def initialize_statistics() -> Dict:
     }
 
 def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
+    model.composite_loss = []
     model.median_loss = []
     model.mean_loss = []
     model.std_loss = []
     model.neuron_dormancy = []
-    # model.gradients = []
+    return model
+
+def compute_reachability(model: torch.nn.Module) -> float:
+    graph, total_neurons = graph_utilities.operations.convert_to_graph(model)
+    functional_mask = graph_utilities.operations.functional_core(graph, total_neurons)
+
+    functional_graph, functional_total_neurons = graph_utilities.operations.extract_from_mask(graph, total_neurons, functional_mask)
+    functional_reachability = graph_utilities.operations.interlayer_connectivity(total_neurons, functional_mask, functional_mask)
+
+    edge_overlap = graph_utilities.operations.edge_reachability(model, functional_reachability)
+    neuron_overlap = [reachable / total for (reachable, total) in zip(functional_total_neurons, total_neurons)]
+
+    print(neuron_overlap, edge_overlap)
+    return float(numpy.mean(edge_overlap))
+
+def attach_reachabilities(model: torch.nn.Module) -> torch.nn.Module:
+    graph, total_neurons = graph_utilities.operations.convert_to_graph(model)
+
+    forward_mask = graph_utilities.operations.reachable_from_input(graph, total_neurons)
+    backward_mask = graph_utilities.operations.reachable_from_output(graph, total_neurons)
+
+    backward_reachabilities = graph_utilities.operations.interlayer_connectivity(total_neurons, forward_mask=numpy.ones_like(backward_mask), backward_mask=backward_mask)
+    forward_reachabilities = graph_utilities.operations.interlayer_connectivity(total_neurons, forward_mask=forward_mask, backward_mask=numpy.ones_like(forward_mask))
+    functional_reachabilities = graph_utilities.operations.interlayer_connectivity(total_neurons, forward_mask=backward_mask, backward_mask=forward_mask)
+
+    # collect only custom layers
+    layers = []
+    for layer in model.modules():
+        if not isinstance(layer, src.network.detail.MaskedLayer):
+            continue
+        if not isinstance(layer.layer, torch.nn.Linear):
+            raise RuntimeError("currently only linear layers are supported!")
+        layers.append(layer)
+
+    assert len(backward_reachabilities) == len(layers)
+
+    for (layer, backward_reachability, forward_reachability, functional_reachability) in zip(layers, backward_reachabilities, forward_reachabilities, functional_reachabilities):
+        layer.backward_reachability.copy_(torch.from_numpy(backward_reachability).to(layer.layer.weight.device))
+        layer.forward_reachability.copy_(torch.from_numpy(forward_reachability).to(layer.layer.weight.device))
+        layer.functional_reachability.copy_(torch.from_numpy(functional_reachability).to(layer.layer.weight.device))
+
     return model
 
 # instantiates network with all statistics to track
-def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device) -> torch.nn.Module:
+def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device) -> torch.nn.Module:
     model = model_factory().to(device)
 
     if parent is not None:
-        model.load_state_dict(parent.state_dict())
+        model.load_state_dict(parent.state_dict(), strict=False)
 
-    model = update_mask(model, warmup_strategy, pruning_strategy, regrowth_strategy)
-    model.pruned_fraction = pruning_strategy.pruned_fraction()
+    model = attach_reachabilities(model)
+    model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
+
+    model = attach_reachabilities(model)
+    model.reachability = 1.0 - compute_reachability(model)
+
+    model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
     model = reset_tracked_fields(model)
 
     # fields required to estimate (amortized) FLOPs of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
@@ -98,38 +149,69 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
 
     return model
 
+def clamp(x, lo, hi):
+    return max(lo, min(x, hi))
+
 # helper for running forward/backward pass that computes all scores
-def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict) -> Tuple[torch.nn.Module, Dict]:
+def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict, epoch: int, batch: int) -> Tuple[torch.nn.Module, Dict]:
 
     logits = []
     for model in models:
         statistics["total_batches"] += 1
 
+        neuron_entropy = []
         scores = []
         def compute_dormancy_score(module: torch.nn.Module, input: torch.Tensor, output: torch.Tensor) -> None:
-            nonlocal scores
-            scores.append(module.dormancy_score(output))
+            nonlocal neuron_entropy, scores
 
-        # compute forward with neuron dormancy
+            layer_activation, score = module.dormancy_score(output)
+            p = (layer_activation / layer_activation.sum()).clamp_min(1e-12)
+
+            _entropy = -(p * p.log()).sum()
+            _entropy /= torch.log(torch.tensor(float(p.numel()), device=p.device))
+
+            neuron_entropy.append(_entropy)
+            scores.append(score)
+
+        # compute forward with neuron dormancy and edge entropy
         handles = [m.register_forward_hook(compute_dormancy_score) for m in model.modules() if isinstance(m, src.network.detail.ActivationFunctionWrapper)]
         outputs = model(input)
         for h in handles:
             h.remove()
 
         # get loss
-        loss = criterion(outputs, targets)
+        loss = criterion(outputs, targets) # get loss
 
-        model.optimizer.zero_grad()
-        loss.mean().backward()
+        # model.optimizer.zero_grad() # zero gradients
+        # loss.mean().backward(retain_graph=True) # compute gradients but DO NOT DROP computational graph - we need it for flow estimation
+        # for layer in model.modules():
+        #     if isinstance(layer, src.network.detail.MaskedLayer):
+        #         print(f"pure_loss: {layer.layer.weight.grad * layer.mask}, {torch.min(layer.layer.weight.grad * layer.mask)}, {torch.max(layer.layer.weight.grad * layer.mask)}")
+        #         break
+
+        neuron_entropy = torch.stack(neuron_entropy).mean(dim=0)
+
+        alpha = 0.125
+
+        task_loss = loss.mean()# * (1 - alpha * (neuron_entropy))
+
+        model.optimizer.zero_grad() # zero gradients
+        task_loss.backward()
+
+        # for layer in model.modules():
+        #     if isinstance(layer, src.network.detail.MaskedLayer):
+        #         print(f"task_loss: {layer.layer.weight.grad * layer.mask}, {torch.min(layer.layer.weight.grad * layer.mask)}, {torch.max(layer.layer.weight.grad * layer.mask)}")
+        #         break
 
         # store stats
         with torch.no_grad():
+            model.composite_loss.append(task_loss.item())
             model.median_loss.append(loss.quantile(q=0.5).item())
             model.mean_loss.append(loss.mean().item())
             model.std_loss.append(loss.std().item())
             model.neuron_dormancy.append(scores)
-            #model.gradients.append(src.utilities.extract_gradients(model)) # TODO figure out how to summarize this efficiently
             model.seen_batches += 1
+            model.accumulate_flow()
 
         model.optimizer.step()
         logits.append(outputs)
@@ -177,20 +259,15 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "median_loss": numpy.mean(children[0].median_loss),
         "mean_loss": numpy.mean(children[0].mean_loss),
         "std_loss": numpy.mean(children[0].std_loss),
-        # "mean_gradient": numpy.mean(numpy.mean(children[0].gradients, axis=0)),
-        # "std_gradient": numpy.mean(numpy.std(children[0].gradients, axis=0)),
         "neuron_dormancy": numpy.mean(children[0].neuron_dormancy),
 
         # population statistics
         "p_median_loss": numpy.mean([numpy.mean(child.median_loss) for child in children]),
         "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
         "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
-        # "p_mean_gradient": numpy.mean([numpy.mean(numpy.mean(child.gradients, axis=0)) for child in children]),
-        # "p_std_gradient": numpy.mean([numpy.mean(numpy.std(child.gradients, axis=0)) for child in children]),
         "p_neuron_dormancy": numpy.mean([numpy.mean(child.neuron_dormancy) for child in children]),
 
         # miscellaneous
-        "expected_sparsity": children[0].expected_sparsity(),
         "realized_sparsity": children[0].realized_sparsity(),
         "active_weights": children[0].active_weights(),
         "total_weights": children[0].total_weights(),

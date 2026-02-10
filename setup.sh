@@ -1,1 +1,1 @@
-pip install argparse torch torchvision matplotlib scipy imageio tqdm numpy
+pip install argparse torch torchvision matplotlib scipy imageio tqdm numpy statsmodels

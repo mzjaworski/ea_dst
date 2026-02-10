@@ -18,19 +18,19 @@ import torch
 class BasicBlock(torch.nn.Module):
     expansion = 1
 
-    def __init__(self, in_planes: int, planes: int, stride: int, sparsity: float):
+    def __init__(self, in_planes: int, planes: int, stride: int):
         super(BasicBlock, self).__init__()
 
-        self.conv1 = src.network.detail.MaskedLayer(torch.nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False), sparsity)
+        self.conv1 = src.network.detail.MaskedLayer(torch.nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False))
         self.bn1 = torch.nn.BatchNorm2d(planes)
         self.relu1 = src.network.detail.ActivationFunctionWrapper(torch.nn.ReLU(inplace=True))
-        self.conv2 = src.network.detail.MaskedLayer(torch.nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False), sparsity)
+        self.conv2 = src.network.detail.MaskedLayer(torch.nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False))
         self.bn2 = torch.nn.BatchNorm2d(planes)
 
         self.shortcut = torch.nn.Sequential()
         if stride != 1 or in_planes != self.expansion*planes:
             self.shortcut = torch.nn.Sequential(
-                src.network.detail.MaskedLayer(torch.nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False), sparsity),
+                src.network.detail.MaskedLayer(torch.nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False)),
                 torch.nn.BatchNorm2d(self.expansion*planes)
             )
         self.relu2 = src.network.detail.ActivationFunctionWrapper(torch.nn.ReLU(inplace=True))
@@ -45,21 +45,21 @@ class BasicBlock(torch.nn.Module):
 class Bottleneck(torch.nn.Module):
     expansion = 4
 
-    def __init__(self, in_planes: int, planes: int, stride: int, sparsity: float):
+    def __init__(self, in_planes: int, planes: int, stride: int):
         super(Bottleneck, self).__init__()
-        self.conv1 = src.network.detail.MaskedLayer(torch.nn.Conv2d(in_planes, planes, kernel_size=1, bias=False), sparsity)
+        self.conv1 = src.network.detail.MaskedLayer(torch.nn.Conv2d(in_planes, planes, kernel_size=1, bias=False))
         self.bn1 = torch.nn.BatchNorm2d(planes)
         self.relu1 = src.network.detail.ActivationFunctionWrapper(torch.nn.ReLU(inplace=True))
-        self.conv2 = src.network.detail.MaskedLayer(torch.nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False), sparsity)
+        self.conv2 = src.network.detail.MaskedLayer(torch.nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False))
         self.bn2 = torch.nn.BatchNorm2d(planes)
         self.relu2 = src.network.detail.ActivationFunctionWrapper(torch.nn.ReLU(inplace=True))
-        self.conv3 = src.network.detail.MaskedLayer(torch.nn.Conv2d(planes, self.expansion * planes, kernel_size=1, bias=False), sparsity)
+        self.conv3 = src.network.detail.MaskedLayer(torch.nn.Conv2d(planes, self.expansion * planes, kernel_size=1, bias=False))
         self.bn3 = torch.nn.BatchNorm2d(self.expansion*planes)
 
         self.shortcut = torch.nn.Sequential()
         if stride != 1 or in_planes != self.expansion*planes:
             self.shortcut = torch.nn.Sequential(
-                src.network.detail.MaskedLayer(torch.nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False), sparsity),
+                src.network.detail.MaskedLayer(torch.nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False)),
                 torch.nn.BatchNorm2d(self.expansion*planes)
             )
         self.relu3 = src.network.detail.ActivationFunctionWrapper(torch.nn.ReLU(inplace=True))
@@ -75,11 +75,11 @@ class Bottleneck(torch.nn.Module):
 
 class ResNet(src.network.detail.NetworkInterface):
 
-    def __init__(self, block: torch.nn.Module, num_blocks: List[int], num_classes: int, sparsity: float):
+    def __init__(self, block: torch.nn.Module, num_blocks: List[int], num_classes: int, sparsity: float, method: str = 'uniform'):
         super(ResNet, self).__init__()
         self.in_planes = 64
 
-        self.conv1 = src.network.detail.MaskedLayer(torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False), sparsity)
+        self.conv1 = src.network.detail.MaskedLayer(torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False))
         self.bn1 = torch.nn.BatchNorm2d(64)
         self.relu1 = src.network.detail.ActivationFunctionWrapper(torch.nn.ReLU(inplace=True))
 
@@ -87,13 +87,14 @@ class ResNet(src.network.detail.NetworkInterface):
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2, sparsity=sparsity)
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2, sparsity=sparsity)
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2, sparsity=sparsity)
-        self.linear = src.network.detail.MaskedLayer(torch.nn.Linear(512*block.expansion, num_classes), sparsity)
+        self.linear = src.network.detail.MaskedLayer(torch.nn.Linear(512*block.expansion, num_classes))
+        src.network.detail.initialize_masks(self, method=method, sparsity=sparsity)
 
     def _make_layer(self, block: torch.nn.Module, planes: int, num_blocks: int, stride: int, sparsity: float) -> torch.nn.Sequential:
         strides = [stride] + [1]*(num_blocks-1)
         layers = []
         for stride in strides:
-            layers.append(block(in_planes=self.in_planes, planes=planes, stride=stride, sparsity=sparsity))
+            layers.append(block(in_planes=self.in_planes, planes=planes, stride=stride))
             self.in_planes = planes * block.expansion
         return torch.nn.Sequential(*layers)
 

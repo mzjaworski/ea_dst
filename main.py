@@ -18,6 +18,14 @@ import argparse
 import random
 import sys
 
+import graph_utilities.operations
+
+def compute_reachability(model: torch.nn.Module) -> torch.nn.Module:
+    graph, total_neurons = graph_utilities.operations.convert_to_graph(model)
+    _, core_neurons = graph_utilities.operations.extract_functional_core(graph, total_neurons)
+    model.reachability = float(numpy.mean([reachable / total for (reachable, total) in zip(core_neurons, total_neurons)]))
+    return model
+
 def stage_budgets(total_budget: int, num_children: int, keep: float) -> List[int]:
     S = int(math.floor(math.log(num_children, 1.0 / keep)))
     weights = [(1.0 / keep) ** s for s in range(S)]
@@ -71,59 +79,63 @@ def soft_top_k(candidates: List, select: int, decay_rate: float) -> List:
     selected_indices = numpy.random.choice(data_count, size=select, replace=False, p=probabilities)
     return [candidates[i] for i in selected_indices]
 
+
+def collect_masks(model):
+    mask_chunks = []
+
+    for module in model.modules():
+        if isinstance(module, src.network.detail.MaskedLayer):
+            mask_chunks.append(module.mask.float().view(-1))
+
+    return torch.cat(mask_chunks, dim=0)
+
 # magnitude based ordering
 def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
-    loss = numpy.array([c.mean_loss for c in candidates])
+    loss = numpy.array([c.composite_loss for c in candidates])
     diff = numpy.abs(numpy.diff(loss, axis=1))
 
-    pop_loss = loss.mean(axis=0)
-    pop_diff = diff.mean(axis=0)
+    pop_loss = numpy.median(loss, axis=0)
+    pop_diff = numpy.median(diff, axis=0)
 
     for i, c in enumerate(candidates):
         level = loss[i][1:] / (pop_loss[1:] + eps)
         slope = diff[i] / (pop_diff + eps)
-        c.rank = numpy.mean(alpha * level + (1.0 - alpha) * slope)
+        c.rank = float(numpy.mean(alpha * level + (1.0 - alpha) * slope))
 
     return candidates
 
 # # rank based ordering
 # def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
 #
-#     if len(candidates) < 2 or len(candidates[0].mean_loss) < 2:
+#     if len(candidates) < 2 or len(candidates[0].composite_loss) < 2:
 #         for c in candidates:
 #             c.rank = 0.0
 #         return candidates
 #
-#     # get loss and its change
-#     loss = numpy.array([c.mean_loss for c in candidates])
-#     diff = numpy.abs(numpy.diff(loss, axis=1))
+#     mean_loss = numpy.array([c.composite_loss for c in candidates])
+#     diff_loss = numpy.array([[1.0 - c.flow_entropy()] for c in candidates])#numpy.diff(mean_loss, axis=1)
 #
 #     # align loss with change
-#     loss = loss[:, 1:]
+#     # mean_loss = mean_loss[:, 1:]
 #
-#     # compute per candidate averages
-#     loss_score = numpy.mean(loss, axis=1)
-#     diff_score = numpy.mean(diff, axis=1)
-#
-#     # assign ranks
-#     loss_rank = numpy.argsort(numpy.argsort(loss_score))
-#     diff_rank = numpy.argsort(numpy.argsort(diff_score))
+#     mean_rank = numpy.argsort(numpy.argsort(mean_loss, axis=0), axis=0)
+#     diff_rank = numpy.argsort(numpy.argsort(diff_loss, axis=0), axis=0)
 #
 #     # normalize in [0, 1]
 #     N = len(candidates)
-#     loss_rank = loss_rank / (N - 1 + eps)
+#     mean_rank = mean_rank / (N - 1 + eps)
 #     diff_rank = diff_rank / (N - 1 + eps)
 #
 #     # combine based on alpha
-#     final_rank = alpha * loss_rank + (1.0 - alpha) * diff_rank
+#     final_rank = alpha * mean_rank + (1.0 - alpha) * diff_rank
 #
 #     for i, c in enumerate(candidates):
-#         c.rank = final_rank[i]
+#         c.rank = float(numpy.mean(final_rank[i]))
 #
 #     return candidates
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
-                warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
+                warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], decay_strategy: src.rules.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float):
     statistics = training_utilities.initialize_statistics()
 
@@ -136,7 +148,8 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         statistics["current_epoch"] += 1
         statistics["epoch_start"] = time.perf_counter()
 
-        pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
+        for pruning_strategy in pruning_strategies:
+            pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
 
         # apply learning rate decay to children
         if len(children):
@@ -144,7 +157,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 child.lr_decay.step()
 
         # train for one epoch
-        for (inputs, targets) in train_loader:
+        for batch_index, (inputs, targets) in enumerate(train_loader):
             inputs, targets = inputs.to(device), targets.to(device)
 
             # update population
@@ -155,19 +168,22 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 if len(children):
                     children = rank_models(children, alpha=alpha)
                     children.sort(key=fitness_function)
-                    print([(child.index, fitness_function(child)) for child in children])
+                    print([(child.index, fitness_function(child), float(numpy.mean(child.mean_loss)), child.flow_entropy()) for child in children])
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
                     statistics["amortized_flops"] += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
                     children = []
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
-                    child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning_strategy, regrowth_strategy, train_loader, minibatch_budget, device)
+                    if current_epoch == 1:
+                        child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, None, None, train_loader, minibatch_budget, device)
+                    else:
+                        child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device)
                     child.index = child_index
                     children.append(child)
 
             # train population
-            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics)
+            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics, current_epoch, batch_index)
 
         # log epoch end time
         statistics["epoch_end"] = time.perf_counter()
@@ -181,10 +197,20 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         log_entry = training_utilities.generate_log_entry(statistics, children, train_loader, test_loader, device)
         settings.logger.log(log_entry)
 
+        # if current_epoch == 1:
+        #     graph, total_neurons = graph_utilities.operations.convert_to_graph(children[0])
+        #     graph_utilities.operations.draw_layered_graph(graph, total_neurons, filename="graph_start.png")
+        # if current_epoch == 50:
+        #     graph, total_neurons = graph_utilities.operations.convert_to_graph(children[0])
+        #     graph_utilities.operations.draw_layered_graph(graph, total_neurons, filename="graph_middle.png")
+        # if current_epoch == 100:
+        #     graph, total_neurons = graph_utilities.operations.convert_to_graph(children[0])
+        #     graph_utilities.operations.draw_layered_graph(graph, total_neurons, filename="graph_end.png")
+
     return children
 
 def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
-                warmup_strategy: src.rules.warmup.Warmup, pruning_strategy: src.rules.pruning.Pruning, regrowth_strategy: src.rules.regrowth.Regrowth, decay_strategy: src.rules.decay.DecayStrategy,
+                warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], decay_strategy: src.rules.decay.DecayStrategy,
                 device: torch.device, epochs: int, offspring: int, minibatch_budget: int, decay_rate: float, keep: float):
     statistics = training_utilities.initialize_statistics()
 
@@ -200,7 +226,8 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
         statistics["current_epoch"] += 1
         statistics["epoch_start"] = time.perf_counter()
 
-        pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))  # update fraction
+        for pruning_strategy in pruning_strategies:
+            pruning_strategy.decay_pruned_fraction(decay_strategy.update(0))  # update fraction
 
         # apply learning rate decay to children
         if len(children):
@@ -208,7 +235,7 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
                 child.lr_decay.step()
 
         # train for one epoch
-        for (inputs, targets) in train_loader:
+        for batch_index, (inputs, targets) in enumerate(train_loader):
             inputs, targets = inputs.to(device), targets.to(device)
 
             halving_time, survivor_count, current_alpha = halving_scheduler()
@@ -231,12 +258,12 @@ def staged_train_epoch(model_factory, optimizer_factory, lr_decay_factory, crite
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
-                    child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning_strategy, regrowth_strategy, train_loader, minibatch_budget, device)
+                    child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device)
                     child.index = child_index
                     children.append(child)
 
             # train population
-            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics)
+            children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics, batch_index == 0)
 
         # log epoch end time
         statistics["epoch_end"] = time.perf_counter()
@@ -291,10 +318,10 @@ if __name__ == "__main__":
     criterion_factory = lambda: utilities.resolve_class(settings.criterion["type"])(**settings.criterion["kwargs"])
 
     warmup = utilities.resolve_class(settings.warmup["type"])(dataset=train_loader, **settings.warmup["kwargs"])
-    pruning = utilities.resolve_class(settings.pruning["type"])(**settings.pruning["kwargs"])
-    regrowth = utilities.resolve_class(settings.regrowth["type"])(**settings.regrowth["kwargs"])
+    pruning = [utilities.resolve_class(settings.pruning["type"])(**settings.pruning["kwargs"])] if isinstance(settings.pruning, dict) else [utilities.resolve_class(entry["type"])(**entry["kwargs"]) for entry in settings.pruning]
+    regrowth = [utilities.resolve_class(settings.regrowth["type"])(**settings.regrowth["kwargs"])] if isinstance(settings.regrowth, dict) else [utilities.resolve_class(entry["type"])(**entry["kwargs"]) for entry in settings.regrowth]
     decay = utilities.resolve_class(settings.decay["type"])(**settings.decay["kwargs"])
 
     # instantiate experiment handle and call it
-    models = globals()[settings.mode["type"]](model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategy=pruning, regrowth_strategy=regrowth, decay_strategy=decay, **settings.mode["kwargs"])
-    utilities.resolve_class(settings.serialize["type"])(**settings.serialize["kwargs"]).serialize(models) if settings.serialize is not None else None
+    models = globals()[settings.mode["type"]](model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader, test_loader, warmup_strategy=warmup, pruning_strategies=pruning, regrowth_strategies=regrowth, decay_strategy=decay, **settings.mode["kwargs"])
+    utilities.resolve_class(settings.serialize["type"])(**settings.serialize["kwargs"]).serialize([models[0]]) if settings.serialize is not None else None
