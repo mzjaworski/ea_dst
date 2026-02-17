@@ -55,42 +55,40 @@ class MaskedWeight(torch.autograd.Function):
     def backward(ctx, gradient: torch.Tensor) -> Tuple[torch.Tensor, None]:
         return gradient, None
 
-class MaskedLayer(torch.nn.Module):
+
+
+
+class Graph(ABC):
+
+    @abstractmethod
+    def forward_pass(self, input_connectivity: torch.Tensor) -> torch.Tensor:
+        pass
+
+    @abstractmethod
+    def backward_pass(self, output_connectivity: torch.Tensor) -> torch.Tensor:
+        pass
+
+
+class MaskedLayer(torch.nn.Module, Graph, ABC):
     def __init__(self, layer: torch.nn.Module):
         super().__init__()
-        assert isinstance(layer, (torch.nn.Linear, torch.nn.Conv2d)), "MaskedLayer supports Linear or Conv2d only"
 
         self.layer = layer
         self.mask = torch.nn.Parameter(torch.ones_like(layer.weight), requires_grad=False)
 
         # used to compute flow going through node
         self.register_buffer('forward_reachability', torch.zeros_like(layer.weight))
-        self.register_buffer('forward_flow', torch.zeros_like(layer.weight))
         self.register_buffer('backward_reachability', torch.zeros_like(layer.weight))
-        self.register_buffer('backward_flow', torch.zeros_like(layer.weight))
 
-        self.register_buffer('functional_reachability', torch.zeros_like(layer.weight))
+        self.register_buffer('forward_flow', torch.zeros_like(layer.weight))
+        self.register_buffer('backward_flow', torch.zeros_like(layer.weight))
 
         self._activation = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        self._activation = x # for flow computation
-
-        masked_weight = MaskedWeight.apply(self.layer.weight, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
-        if isinstance(self.layer, torch.nn.Linear): # there are much better ways to do this but it works for now
-            return torch.nn.functional.linear(x, masked_weight, self.layer.bias)
-        elif isinstance(self.layer, torch.nn.Conv2d):
-            return torch.nn.functional.conv2d(x, masked_weight, self.layer.bias, stride=self.layer.stride, padding=self.layer.padding, dilation=self.layer.dilation, groups=self.layer.groups)
-        raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
-
-    def nout_nin_kh_kw(self) -> Tuple[int, int, int, int]: # amazing method name
-        if isinstance(self.layer, torch.nn.Linear):
-            n_out, n_in = self.layer.weight.shape
-            return n_out, n_in, 0, 0
-        elif isinstance(self.layer, torch.nn.Conv2d):
-            n_out, n_in, kH, kW = self.layer.weight.shape
-            return n_out, n_in, kH, kW
-        raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
+        self._activation = x
+        self.layer.weight.data = MaskedWeight.apply(self.layer.weight.data, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
+        return self.layer(x)
 
     def realized_sparsity(self) -> float:
         return 1.0 - self.mask.sum().item() / self.mask.numel()
@@ -101,31 +99,38 @@ class MaskedLayer(torch.nn.Module):
     def total_weights(self) -> int:
         return self.mask.numel()
 
+    def reset_flow(self) -> None:
+        self.forward_flow.zero_()
+        self.backward_flow.zero_()
+
+    @abstractmethod
+    def nout_nin_kh_kw(self) -> Tuple[int, int, int, int]: # amazing method name
+        pass
+
+    @abstractmethod
+    def estimate_flops(self, input_tensor: torch.Tensor) -> Tuple[int, int]:
+        pass
+
+    @abstractmethod
+    def accumulate_flow(self) -> None:
+        pass
+
+class MaskedLinear(MaskedLayer):
+
+    def __init__(self, layer: torch.nn.Linear):
+        assert isinstance(layer, torch.nn.Linear), "MaskedLinear supports Linear only"
+        super().__init__(layer)
+
+    def nout_nin_kh_kw(self) -> Tuple[int, int, int, int]: # amazing method name
+        n_out, n_in = self.layer.weight.shape
+        return n_out, n_in, 0, 0
+
     def estimate_flops(self, input_tensor: torch.Tensor) -> Tuple[int, int]:
         def flop_estimate(non_zero: int):
-            # now estimate effective flop count based on type of layer
-            if isinstance(self.layer, torch.nn.Linear):
-                weight_flops = 2.0 * non_zero
-                bias_flops = self.layer.out_features if self.layer.bias is not None else 0
-                return weight_flops + bias_flops
-            elif isinstance(self.layer, torch.nn.Conv2d):
-                _, _, H_in, W_in = input_tensor.shape
-
-                Kh, Kw = self.layer.kernel_size
-                Sh, Sw = self.layer.stride
-                Ph, Pw = self.layer.padding
-                Dh, Dw = self.layer.dilation
-
-                H_out = (H_in + 2 * Ph - Dh * (Kh - 1) - 1) // Sh + 1
-                W_out = (W_in + 2 * Pw - Dw * (Kw - 1) - 1) // Sw + 1
-
-                weight_flops = 2 * (non_zero / self.layer.out_channels) * H_out * W_out
-                bias_flops = self.layer.out_channels * H_out * W_out if self.layer.bias is not None else 0
-
-                return weight_flops + bias_flops
-            raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
-
-        return flop_estimate(self.total_weights()), flop_estimate(self.active_weights())
+            weight_flops = 2.0 * non_zero
+            bias_flops = self.layer.out_features if self.layer.bias is not None else 0
+            return weight_flops + bias_flops
+        return int(flop_estimate(self.total_weights())), int(flop_estimate(self.active_weights()))
 
     def accumulate_flow(self) -> None:
         if self.layer.weight.grad is None or self._activation is None:
@@ -136,36 +141,131 @@ class MaskedLayer(torch.nn.Module):
         weight = self.layer.weight.detach().abs()
         mask = self.mask
 
-        if isinstance(self.layer, torch.nn.Linear):
-            dim = 0
-        elif isinstance(self.layer, torch.nn.Conv2d):
-            dim = (0, 2, 3)
-        else:
-            raise RuntimeError(f"unsupported layer type: {type(self.layer)} in MaskedLayer! ")
+        self.forward_flow += (act.mean(dim=tuple(range(act.ndim - 1)), keepdim=False) * weight) * self.forward_reachability * mask
+        self.backward_flow += (grad * weight) * self.backward_reachability * mask
+
+    def forward_pass(self, input_connectivity: torch.Tensor) -> torch.Tensor:
+        original_shape = input_connectivity.shape
+        in_features = self.mask.shape[1]
+        out_features = self.mask.shape[0]
+
+        # flatten leading dims
+        x = input_connectivity.reshape(-1, in_features)  # (N, in_features)
+
+        outputs = []
+        for sample in x:
+            # exactly original 1D logic
+            out_reach = (self.mask.to(torch.bool) & sample.unsqueeze(0)).any(dim=1)
+            outputs.append(out_reach)
+
+            # store forward reachability exactly as before
+            self.forward_reachability.copy_(torch.ones_like(out_reach).unsqueeze(1) & sample.unsqueeze(0))
+
+        output_reachability = torch.stack(outputs, dim=0)  # (N, out_features)
+        return output_reachability.reshape(*original_shape[:-1], out_features)
+
+    def backward_pass(self, output_connectivity: torch.Tensor) -> torch.Tensor:
+        original_shape = output_connectivity.shape
+        in_features = self.mask.shape[1]
+        out_features = self.mask.shape[0]
+
+        x = output_connectivity.reshape(-1, out_features)  # (N, out_features)
+
+        inputs = []
+        for sample in x:
+            in_reach = (self.mask.to(torch.bool) & sample.unsqueeze(1)).any(dim=0)
+            inputs.append(in_reach)
+
+            # store backward reachability exactly as before
+            self.backward_reachability.copy_(sample.unsqueeze(1) & torch.ones_like(in_reach).unsqueeze(0))
+
+        input_reachability = torch.stack(inputs, dim=0)  # (N, in_features)
+        return input_reachability.reshape(*original_shape[:-1], in_features)
+
+class MaskedConv2D(MaskedLayer):
+
+    def __init__(self, layer: torch.nn.Module):
+        assert isinstance(layer, torch.nn.Conv2d), "MaskedConv2D supports Conv2d only"
+        super().__init__(layer)
+
+    def nout_nin_kh_kw(self) -> Tuple[int, int, int, int]: # amazing method name
+        n_out, n_in, kH, kW = self.layer.weight.shape
+        return n_out, n_in, kH, kW
+
+    def estimate_flops(self, input_tensor: torch.Tensor) -> Tuple[int, int]:
+        def flop_estimate(non_zero: int):
+            _, _, H_in, W_in = input_tensor.shape
+
+            Kh, Kw = self.layer.kernel_size
+            Sh, Sw = self.layer.stride
+            Ph, Pw = self.layer.padding
+            Dh, Dw = self.layer.dilation
+
+            H_out = (H_in + 2 * Ph - Dh * (Kh - 1) - 1) // Sh + 1
+            W_out = (W_in + 2 * Pw - Dw * (Kw - 1) - 1) // Sw + 1
+
+            weight_flops = 2 * (non_zero / self.layer.out_channels) * H_out * W_out
+            bias_flops = self.layer.out_channels * H_out * W_out if self.layer.bias is not None else 0
+
+            return weight_flops + bias_flops
+
+        return int(flop_estimate(self.total_weights())), int(flop_estimate(self.active_weights()))
+
+    def accumulate_flow(self) -> None:
+        if self.layer.weight.grad is None or self._activation is None:
+            return
+
+        act = self._activation.detach().abs()
+        grad = self.layer.weight.grad.detach().abs()
+        weight = self.layer.weight.detach().abs()
+        mask = self.mask
+
+        dim = (0, 2, 3)
 
         self.forward_flow += (act.mean(dim=dim, keepdim=True) * weight) * self.forward_reachability * mask
         self.backward_flow += (grad * weight) * self.backward_reachability * mask
 
-    # llm generated
-    def get_node_flow(self) -> torch.Tensor:
+    def forward_pass(self, input_connectivity: torch.Tensor) -> torch.Tensor:
+        in_channels, H_in, W_in = input_connectivity.shape
 
-        if self.forward_flow is None or self.backward_flow is None:
-            raise RuntimeError("forward_flow or backward_flow not initialized.")
+        H_out = (H_in + 2 * self.layer.padding[0] - self.layer.dilation[0] * (self.layer.kernel_size[0] - 1) - 1) // self.layer.stride[0] + 1
+        W_out = (W_in + 2 * self.layer.padding[1] - self.layer.dilation[1] * (self.layer.kernel_size[1] - 1) - 1) // self.layer.stride[1] + 1
 
-        edge_flow = self.forward_flow * self.backward_flow
+        output_reachability = torch.ones((self.layer.out_channels, H_out, W_out), dtype=torch.bool, device=input_connectivity.device)
+        self.forward_reachability.copy_(self.mask.bool().clone())
 
-        if isinstance(self.layer, torch.nn.Linear):
-            node_flow = edge_flow.sum(dim=1)
-        elif isinstance(self.layer, torch.nn.Conv2d):
-            node_flow = edge_flow.sum(dim=(1, 2, 3))
-        else:
-            raise RuntimeError(f"Unsupported layer type: {type(self.layer)} in get_node_flow!")
+        return output_reachability
 
-        return node_flow[node_flow > 0] # return flow only for active neurons
+    def backward_pass(self, output_connectivity: torch.Tensor) -> torch.Tensor:
+        out_channels, H_out, W_out = output_connectivity.shape
+        in_channels, kernel_h, kernel_w = self.mask.shape[1], self.mask.shape[2], self.mask.shape[3]
 
-    def reset_flow(self) -> None:
-        self.forward_flow.zero_()
-        self.backward_flow.zero_()
+        H_in = (H_out - 1) * self.layer.stride[0] - 2 * self.layer.padding[0] + self.layer.dilation[0] * (kernel_h - 1) + 1
+        W_in = (W_out - 1) * self.layer.stride[1] - 2 * self.layer.padding[1] + self.layer.dilation[1] * (kernel_w - 1) + 1
+
+        input_reachability = torch.ones((in_channels, H_in, W_in), dtype=torch.bool, device=output_connectivity.device)
+        self.backward_reachability.copy_(self.mask.bool().clone())
+
+        return input_reachability
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class NetworkInterface(torch.nn.Module, ABC):
 
@@ -188,9 +288,3 @@ class NetworkInterface(torch.nn.Module, ABC):
             for layer in self.modules():
                 if isinstance(layer, MaskedLayer):
                     layer.reset_flow()
-
-    def flow_entropy(self) -> float:
-        casual_mass = torch.cat([layer.get_node_flow() for layer in self.modules() if isinstance(layer, MaskedLayer)])
-        p = casual_mass / (casual_mass.sum() + 1e-12)
-        node_entropy = -(p * p.log()).sum()
-        return float(node_entropy.cpu() / (torch.log(torch.tensor(casual_mass.numel())) + 1e-12).item())

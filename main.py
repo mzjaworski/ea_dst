@@ -168,7 +168,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 if len(children):
                     children = rank_models(children, alpha=alpha)
                     children.sort(key=fitness_function)
-                    print([(child.index, fitness_function(child), float(numpy.mean(child.mean_loss)), child.flow_entropy()) for child in children])
+                    print([(child.index, fitness_function(child), float(numpy.mean(child.mean_loss))) for child in children])
                     best_model = soft_top_k(children, select=1, decay_rate=decay_rate)[0]
                     statistics["amortized_flops"] += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
                     children = []
