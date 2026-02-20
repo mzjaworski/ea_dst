@@ -84,3 +84,16 @@ class DenseANNFromSparseANN(src.network.detail.NetworkInterface):
 
     def forward(self, x) -> torch.Tensor:
         return self.model(x)
+
+    def compute_reachabilities(self):
+        modules = [layer for layer in self.modules() if isinstance(layer, src.network.detail.MaskedLayer)]
+        device = next(self.parameters()).device
+
+        forward = torch.ones(self.in_features, dtype=torch.bool).to(device)
+        backward = torch.ones(self.num_classes, dtype=torch.bool).to(device)
+
+        for module in modules:
+            forward = module.forward_pass(forward)
+
+        for module in reversed(modules):
+            backward = module.backward_pass(backward)

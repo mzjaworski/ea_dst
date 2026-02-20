@@ -63,9 +63,7 @@ def initialize_statistics() -> Dict:
         "epoch_start": 0,
         "epoch_end": 0,
         "total_time": 0,
-        "total_batches": 0,
-        "diversity": 0,
-        "unique_batches": 0,
+        "total_batches": 0
     }
 
 def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
@@ -121,35 +119,17 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
 
     return model
 
-def clamp(x, lo, hi):
-    return max(lo, min(x, hi))
-
 # helper for running forward/backward pass that computes all scores
-def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict, epoch: int, batch: int) -> Tuple[torch.nn.Module, Dict]:
-
+def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict) -> Tuple[torch.nn.Module, Dict]:
     logits = []
     for model in models:
         statistics["total_batches"] += 1
 
         outputs = model(input)
         loss = criterion(outputs, targets) # get loss
-
-        # model.optimizer.zero_grad() # zero gradients
-        # loss.mean().backward(retain_graph=True) # compute gradients but DO NOT DROP computational graph - we need it for flow estimation
-        # for layer in model.modules():
-        #     if isinstance(layer, src.network.detail.MaskedLayer):
-        #         print(f"pure_loss: {layer.layer.weight.grad * layer.mask}, {torch.min(layer.layer.weight.grad * layer.mask)}, {torch.max(layer.layer.weight.grad * layer.mask)}")
-        #         break
-
         task_loss = loss.mean()
-
         model.optimizer.zero_grad() # zero gradients
         task_loss.backward()
-
-        # for layer in model.modules():
-        #     if isinstance(layer, src.network.detail.MaskedLayer):
-        #         print(f"task_loss: {layer.layer.weight.grad * layer.mask}, {torch.min(layer.layer.weight.grad * layer.mask)}, {torch.max(layer.layer.weight.grad * layer.mask)}")
-        #         break
 
         # store stats
         with torch.no_grad():
@@ -162,31 +142,7 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
 
         model.optimizer.step()
         logits.append(outputs)
-
-    with torch.no_grad():
-        statistics["diversity"] += compute_diversity(torch.stack(logits, dim=1), targets)
-        statistics["unique_batches"] += 1
-
     return models, statistics
-
-# Theorem 1 - "Diversity and Generalization in Neural Network Ensembles"
-def compute_diversity(logits: torch.Tensor, targets: torch.Tensor) -> float:
-    batch_count, model_count, class_count = logits.shape
-    probabilities = torch.softmax(logits, dim=-1)
-
-    true_class_probabilities = probabilities[
-        torch.arange(batch_count, device=logits.device)[:, None],
-        torch.arange(model_count, device=logits.device)[None, :],
-        targets[:, None]
-    ]
-
-    normalization = true_class_probabilities.max(dim=1, keepdim=True).values
-    p_tilde = true_class_probabilities / (torch.sqrt(torch.tensor(2.0)) * normalization)
-
-    mean = p_tilde.mean(dim=1)
-    var = (p_tilde ** 2).mean(dim=1) - mean ** 2
-
-    return var.mean().cpu().item()
 
 # helper for generating population level statistics
 def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader, device: torch.device) -> dict:
@@ -199,7 +155,6 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "epoch_time": statistics["epoch_end"] - statistics["epoch_start"],
         "total_batches": statistics["total_batches"],
         "amortized_flops": statistics["amortized_flops"] + numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children]),
-        "diversity": statistics["diversity"] / statistics["unique_batches"],
 
         # best member statistics
         "current_best": children[0].index,

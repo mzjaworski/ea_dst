@@ -9,6 +9,6 @@
   "pruning": {"type": "src.rules.pruning.MagnitudePruning", "kwargs": {"pruned_fraction": 0.3, "decay_rate": null}},
   "regrowth": {"type": "src.rules.regrowth.UniformRegrowth", "kwargs": {"weight_reinitialization": "zero"}},
   "decay": {"type": "src.rules.decay.NullDecay", "kwargs": {}},
-  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "offspring": 10, "decay_rate": null, "minibatch_budget": 512}},
+  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "offspring": 10, "minibatch_budget": 512}},
   "serialize": {"type": "src.serialize.FileSystemSerialization", "kwargs": {"path": "./data/models/tiny_imagenet/custom/zero/ea/magnitude_uniform/995/LOG_IDENTIFIER/"}}
 }
