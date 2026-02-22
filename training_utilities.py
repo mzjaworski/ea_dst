@@ -91,10 +91,10 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
         model.load_state_dict(parent.state_dict(), strict=False)
 
     with torch.no_grad():
-        model.compute_reachabilities()
+        model.compute_reachabilities() # this one is necessary
     model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
     with torch.no_grad():
-        model.compute_reachabilities()
+        model.compute_reachabilities() # this one is just for logging
         print_reachability(model)
 
     model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
@@ -102,6 +102,7 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
 
     # fields required to estimate (amortized) FLOPs of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
     model.amortized_sample_cost = src.utilities.estimate_amortized_flops(model, warmup_strategy, train_loader, minibatch_budget)
+    model.constant_cost = warmup_strategy.constant_cost()
     model.seen_batches = 0
 
     model.train()
@@ -150,7 +151,7 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "total_time": statistics["total_time"],
         "epoch_time": statistics["epoch_end"] - statistics["epoch_start"],
         "total_batches": statistics["total_batches"],
-        "amortized_flops": statistics["amortized_flops"] + numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children]),
+        "amortized_flops": statistics["amortized_flops"] + numpy.sum([(child.amortized_sample_cost * train_loader.batch_size * child.seen_batches) + child.constant_cost for child in children]),
 
         # best member statistics
         "current_best": children[0].index,

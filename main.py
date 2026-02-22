@@ -68,7 +68,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     children = rank_models(children, alpha=alpha)
                     children.sort(key=fitness_function)
                     best_model = children[0]
-                    statistics["amortized_flops"] += numpy.sum([child.amortized_sample_cost * train_loader.batch_size * child.seen_batches for child in children])
+                    statistics["amortized_flops"] += numpy.sum([(child.amortized_sample_cost * train_loader.batch_size * child.seen_batches) + child.constant_cost for child in children])
                     children = []
 
                 # generate new offspring

@@ -200,5 +200,5 @@ class MLPMixer(src.network.detail.NetworkInterface, src.network.detail.Graph):
         forward = torch.ones((self.in_channels, self.image_size, self.image_size), dtype=torch.bool).to(device)
         backward = torch.ones(self.num_classes, dtype=torch.bool).to(device)
 
-        print(self.forward_pass(forward))
-        print(self.backward_pass(backward))
+        self.forward_pass(forward)
+        self.backward_pass(backward)
