@@ -16,60 +16,6 @@ class NullRegrowth(Regrowth):
     def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
         return layer
 
-class FlowRegrowth(Regrowth):
-
-    def __init__(self, weight_reinitialization: str = "xavier_uniform"):
-        self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
-
-    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
-        mask = layer.mask.data
-        flow = layer.flow.data
-        flat_mask = mask.view(-1)
-
-        # get indices of inactive elements
-        inactive_idx = (flat_mask == 0).nonzero(as_tuple=True)[0]
-        if inactive_idx.numel() == 0:
-            return layer
-
-        # compute neighbor-flow proxy for inactive edges
-        X = flow
-        M = mask
-
-        if X.dim() == 2:  # Linear
-            neighbor_flow = X.sum(dim=0) / (M.sum(dim=0) + 1e-12)
-            out_features, in_features = X.shape
-            idx_row = inactive_idx // in_features
-            idx_col = inactive_idx % in_features
-            scores = neighbor_flow[idx_col]
-        elif X.dim() == 4:  # Conv2d [out, in, kH, kW]
-            neighbor_flow = X.sum(dim=(0, 2, 3)) / (M.sum(dim=(0, 2, 3)) + 1e-12)
-            O, I, KH, KW = X.shape
-            tmp = inactive_idx.clone()
-            idx_kw = tmp % KW; tmp //= KW
-            idx_kh = tmp % KH; tmp //= KH
-            idx_in = tmp % I
-            idx_out = tmp // I
-            scores = neighbor_flow[idx_in]
-        else:
-            raise RuntimeError("Unsupported flow shape!")
-
-        if torch.any(scores != 0):
-            probs = scores
-            probs = probs / probs.sum()
-        else:
-            probs = torch.full_like(scores, 1.0 / scores.numel())
-
-        # sample edges to regrow
-        grow_idx = inactive_idx[torch.multinomial(probs, min(pruned_count, inactive_idx.numel()), replacement=False)]
-
-        # update mask
-        flat_mask[grow_idx] = 1
-
-        layer.mask.data = flat_mask.view_as(mask)
-        layer.layer.weight.data = self.reinitialization(layer.layer.weight.data, grow_idx)
-
-        return layer
-
 class UniformRegrowth(Regrowth):
 
     def __init__(self, weight_reinitialization: str = "xavier_uniform"):
@@ -151,11 +97,6 @@ class GuidedUniformRegrowth(Regrowth):
         mask = layer.mask.data
         guidance = layer.forward_reachability.to(torch.bool) & layer.backward_reachability.to(torch.bool)
 
-        # print("---------------------------------------")
-        # print(torch.sum(layer.forward_reachability * layer.mask != 0), torch.sum(layer.forward_reachability * layer.mask == 0))
-        # print(torch.sum(layer.backward_reachability * layer.mask != 0), torch.sum(layer.backward_reachability * layer.mask == 0))
-        # print(torch.sum(guidance * layer.mask != 0), torch.sum(guidance * layer.mask == 0))
-
         flat_mask = mask.view(-1)
         flat_guidance = guidance.view(-1)
 
@@ -171,7 +112,6 @@ class GuidedUniformRegrowth(Regrowth):
 
         # handle pruned_count > available
         k = min(pruned_count, inactive_idx.numel())
-        # print(weights.min(), weights.max(), torch.sum(weights == weights.min()), torch.sum(weights == weights.max()), k)
 
         # weighted uniform sampling without replacement
         sampled = torch.multinomial(weights, k, replacement=False)

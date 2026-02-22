@@ -33,7 +33,7 @@ class MLP(torch.nn.Module, src.network.detail.Graph):
         super().__init__()
         num_hidden = num_features * expansion_factor
         self.fc1 = src.network.detail.MaskedLinear(torch.nn.Linear(num_features, num_hidden))
-        self.act1 = src.network.detail.ActivationFunctionWrapper(torch.nn.GELU())
+        self.act1 = torch.nn.GELU()
         self.norm1 = torch.nn.LayerNorm(num_hidden)
         self.fc2 = src.network.detail.MaskedLinear(torch.nn.Linear(num_hidden, num_features))
 
@@ -200,5 +200,5 @@ class MLPMixer(src.network.detail.NetworkInterface, src.network.detail.Graph):
         forward = torch.ones((self.in_channels, self.image_size, self.image_size), dtype=torch.bool).to(device)
         backward = torch.ones(self.num_classes, dtype=torch.bool).to(device)
 
-        self.forward_pass(forward)
-        self.backward_pass(backward)
+        print(self.forward_pass(forward))
+        print(self.backward_pass(backward))

@@ -31,61 +31,6 @@ class NullPruning(Pruning):
     def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
         pass
 
-class DirectedFlowPruning(Pruning):
-
-    def __init__(self, pruned_fraction: float, decay_rate: float):
-        if pruned_fraction < 0.0 or pruned_fraction > 1.0:
-            raise ValueError("pruned_fraction must be in [0.0, 1.0]")
-
-        self._pruned_fraction = pruned_fraction
-        self.decay_rate = decay_rate
-
-    def apply(self, layer):
-
-        forward_flow = layer.forward_flow.data
-        backward_flow = layer.backward_flow.data
-
-        original_mask = layer.mask.data
-        flat_mask = original_mask.view(-1)
-
-        # identify active weights
-        active_indices = (flat_mask == 1).nonzero(as_tuple=True)[0]
-        total_active = active_indices.numel()
-        if total_active == 0:
-            return 0, layer
-
-        # identify number of weights to remove
-        pruned_count = max(int(self._pruned_fraction * total_active), 1)
-
-        # compute normalized flow
-        flat_forward_flow = forward_flow.view(-1)[active_indices]
-        flat_backward_flow = backward_flow.view(-1)[active_indices]
-
-        flat_f_norm = flat_forward_flow / (flat_forward_flow.max() + 1e-12)
-        flat_b_norm = flat_backward_flow / (flat_backward_flow.max() + 1e-12)
-
-        # select weights to remove
-        scores = flat_f_norm * flat_b_norm
-        magnitudes, order = torch.sort(scores, descending=False)
-        sel_mask = src.utilities.soft_top_k(magnitudes, select=pruned_count, decay_rate=self.decay_rate)
-
-        # retrieve their indices
-        sorted_idx = active_indices[order]
-        to_prune = sorted_idx[sel_mask]
-        num_pruned = to_prune.numel()
-
-        # remove selected weights
-        flat_mask[to_prune] = 0
-        layer.mask.data = flat_mask.view_as(original_mask)
-
-        return num_pruned, layer
-
-    def pruned_fraction(self) -> float:
-        return self._pruned_fraction
-
-    def decay_pruned_fraction(self, strategy: src.rules.decay.DecayStrategy = src.rules.decay.NullDecay()) -> None:
-        self._pruned_fraction = strategy.decay(self._pruned_fraction)
-
 class GuidedMagnitudePruning(Pruning):
 
     def __init__(self, pruned_fraction: float, decay_rate: float):

@@ -1,5 +1,4 @@
 from typing import List, Dict, Tuple
-import graph_utilities.operations
 
 import src.rules.warmup
 import src.rules.pruning
@@ -50,8 +49,6 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                     pruned_count, pruned_layer = prunning_strategy.apply(layer)
                     regrowth_strategy.apply(pruned_count, pruned_layer)
                     # not assigning back should be safe as we deal with references
-
-            layer.reset_flow()  # set flow to zero
 
     return model
 
@@ -138,7 +135,6 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
             model.mean_loss.append(loss.mean().item())
             model.std_loss.append(loss.std().item())
             model.seen_batches += 1
-            model.accumulate_flow()
 
         model.optimizer.step()
         logits.append(outputs)

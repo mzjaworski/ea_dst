@@ -23,28 +23,6 @@ def initialize_masks(network: torch.nn.Module, method: str = 'uniform', sparsity
     else:
         raise RuntimeError(f"unsupported mask initialization: {method}")
 
-class ActivationFunctionWrapper(torch.nn.Module):
-
-    def __init__(self, activation: torch.nn.Module):
-        super().__init__()
-        self.activation = activation
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.activation(x)
-
-    def dormancy_score(self, x: torch.Tensor, tau: float = 0.1) -> Tuple[torch.Tensor, float]: # The Dormant Neuron Phenomenon in Deep Reinforcement Learning
-        if len(x.shape) == 2:
-            expectation = x.abs().mean(dim=0) # abs is my idea
-        elif len(x.shape) == 4:
-            expectation = x.abs().mean(dim=(0, 2, 3)) # abs is my idea
-        else:
-            raise RuntimeError(f"unsupported shape for the input: {x.shape}")
-
-        # normalize
-        expectation = expectation / ((1.0 / expectation.shape[0]) * expectation.sum())
-        score = (expectation <= tau).int().sum() / expectation.shape[0]
-        return expectation, score.item()
-
 class MaskedWeight(torch.autograd.Function):
 
     @staticmethod
@@ -55,9 +33,6 @@ class MaskedWeight(torch.autograd.Function):
     def backward(ctx, gradient: torch.Tensor) -> Tuple[torch.Tensor, None]:
         return gradient, None
 
-
-
-
 class Graph(ABC):
 
     @abstractmethod
@@ -67,7 +42,6 @@ class Graph(ABC):
     @abstractmethod
     def backward_pass(self, output_connectivity: torch.Tensor) -> torch.Tensor:
         pass
-
 
 class MaskedLayer(torch.nn.Module, Graph, ABC):
     def __init__(self, layer: torch.nn.Module):
@@ -80,13 +54,7 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
         self.register_buffer('forward_reachability', torch.zeros_like(layer.weight))
         self.register_buffer('backward_reachability', torch.zeros_like(layer.weight))
 
-        self.register_buffer('forward_flow', torch.zeros_like(layer.weight))
-        self.register_buffer('backward_flow', torch.zeros_like(layer.weight))
-
-        self._activation = None
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        self._activation = x
         self.layer.weight.data = MaskedWeight.apply(self.layer.weight.data, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
         return self.layer(x)
 
@@ -99,20 +67,12 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
     def total_weights(self) -> int:
         return self.mask.numel()
 
-    def reset_flow(self) -> None:
-        self.forward_flow.zero_()
-        self.backward_flow.zero_()
-
     @abstractmethod
     def nout_nin_kh_kw(self) -> Tuple[int, int, int, int]: # amazing method name
         pass
 
     @abstractmethod
     def estimate_flops(self, input_tensor: torch.Tensor) -> Tuple[int, int]:
-        pass
-
-    @abstractmethod
-    def accumulate_flow(self) -> None:
         pass
 
 class MaskedLinear(MaskedLayer):
@@ -132,36 +92,20 @@ class MaskedLinear(MaskedLayer):
             return weight_flops + bias_flops
         return int(flop_estimate(self.total_weights())), int(flop_estimate(self.active_weights()))
 
-    def accumulate_flow(self) -> None:
-        if self.layer.weight.grad is None or self._activation is None:
-            return
-
-        act = self._activation.detach().abs()
-        grad = self.layer.weight.grad.detach().abs()
-        weight = self.layer.weight.detach().abs()
-        mask = self.mask
-
-        self.forward_flow += (act.mean(dim=tuple(range(act.ndim - 1)), keepdim=False) * weight) * self.forward_reachability * mask
-        self.backward_flow += (grad * weight) * self.backward_reachability * mask
-
     def forward_pass(self, input_connectivity: torch.Tensor) -> torch.Tensor:
         original_shape = input_connectivity.shape
         in_features = self.mask.shape[1]
         out_features = self.mask.shape[0]
 
-        # flatten leading dims
-        x = input_connectivity.reshape(-1, in_features)  # (N, in_features)
+        x = input_connectivity.reshape(-1, in_features)
 
         outputs = []
         for sample in x:
-            # exactly original 1D logic
             out_reach = (self.mask.to(torch.bool) & sample.unsqueeze(0)).any(dim=1)
             outputs.append(out_reach)
+        self.forward_reachability.copy_(torch.ones_like(outputs[-1]).unsqueeze(1) & x[-1].unsqueeze(0))
 
-            # store forward reachability exactly as before
-            self.forward_reachability.copy_(torch.ones_like(out_reach).unsqueeze(1) & sample.unsqueeze(0))
-
-        output_reachability = torch.stack(outputs, dim=0)  # (N, out_features)
+        output_reachability = torch.stack(outputs, dim=0)
         return output_reachability.reshape(*original_shape[:-1], out_features)
 
     def backward_pass(self, output_connectivity: torch.Tensor) -> torch.Tensor:
@@ -169,17 +113,15 @@ class MaskedLinear(MaskedLayer):
         in_features = self.mask.shape[1]
         out_features = self.mask.shape[0]
 
-        x = output_connectivity.reshape(-1, out_features)  # (N, out_features)
+        x = output_connectivity.reshape(-1, out_features)
 
         inputs = []
         for sample in x:
             in_reach = (self.mask.to(torch.bool) & sample.unsqueeze(1)).any(dim=0)
             inputs.append(in_reach)
+        self.backward_reachability.copy_(x[-1].unsqueeze(1) & torch.ones_like(inputs[-1]).unsqueeze(0))
 
-            # store backward reachability exactly as before
-            self.backward_reachability.copy_(sample.unsqueeze(1) & torch.ones_like(in_reach).unsqueeze(0))
-
-        input_reachability = torch.stack(inputs, dim=0)  # (N, in_features)
+        input_reachability = torch.stack(inputs, dim=0)
         return input_reachability.reshape(*original_shape[:-1], in_features)
 
 class MaskedConv2D(MaskedLayer):
@@ -211,20 +153,6 @@ class MaskedConv2D(MaskedLayer):
 
         return int(flop_estimate(self.total_weights())), int(flop_estimate(self.active_weights()))
 
-    def accumulate_flow(self) -> None:
-        if self.layer.weight.grad is None or self._activation is None:
-            return
-
-        act = self._activation.detach().abs()
-        grad = self.layer.weight.grad.detach().abs()
-        weight = self.layer.weight.detach().abs()
-        mask = self.mask
-
-        dim = (0, 2, 3)
-
-        self.forward_flow += (act.mean(dim=dim, keepdim=True) * weight) * self.forward_reachability * mask
-        self.backward_flow += (grad * weight) * self.backward_reachability * mask
-
     def forward_pass(self, input_connectivity: torch.Tensor) -> torch.Tensor:
         in_channels, H_in, W_in = input_connectivity.shape
 
@@ -248,25 +176,6 @@ class MaskedConv2D(MaskedLayer):
 
         return input_reachability
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class NetworkInterface(torch.nn.Module, ABC):
 
     def realized_sparsity(self) -> float:
@@ -277,14 +186,3 @@ class NetworkInterface(torch.nn.Module, ABC):
 
     def total_weights(self) -> int:
         return sum([layer.total_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])
-
-    def accumulate_flow(self) -> None:
-        for layer in self.modules():
-            if isinstance(layer, MaskedLayer):
-                layer.accumulate_flow()
-
-    def reset_flow(self) -> None:
-        with torch.no_grad():
-            for layer in self.modules():
-                if isinstance(layer, MaskedLayer):
-                    layer.reset_flow()
