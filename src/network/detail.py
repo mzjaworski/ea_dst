@@ -51,8 +51,8 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
         self.mask = torch.nn.Parameter(torch.ones_like(layer.weight), requires_grad=False)
 
         # used to compute flow going through node
-        self.register_buffer('forward_reachability', torch.zeros_like(layer.weight))
-        self.register_buffer('backward_reachability', torch.zeros_like(layer.weight))
+        self.register_buffer('_forward_reachability', torch.zeros_like(layer.weight).to_sparse())
+        self.register_buffer('_backward_reachability', torch.zeros_like(layer.weight).to_sparse())
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.layer.weight.data = MaskedWeight.apply(self.layer.weight.data, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
@@ -74,6 +74,18 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
     @abstractmethod
     def estimate_flops(self, input_tensor: torch.Tensor) -> Tuple[int, int]:
         pass
+
+    @property
+    def forward_reachability(self) -> torch.Tensor:
+        return self._forward_reachability.clone().to(torch.bool).to_dense()
+
+    @property
+    def backward_reachability(self) -> torch.Tensor:
+        return self._backward_reachability.clone().to(torch.bool).to_dense()
+
+    @property
+    def functional_reachability(self) -> torch.Tensor:
+        return self.forward_reachability & self.backward_reachability
 
 class MaskedLinear(MaskedLayer):
 
@@ -97,32 +109,34 @@ class MaskedLinear(MaskedLayer):
         in_features = self.mask.shape[1]
         out_features = self.mask.shape[0]
 
+        # MLP-Mixer requires some additional logic to make it work properly
         x = input_connectivity.reshape(-1, in_features)
-
         outputs = []
         for sample in x:
             out_reach = (self.mask.to(torch.bool) & sample.unsqueeze(0)).any(dim=1)
             outputs.append(out_reach)
-        self.forward_reachability.copy_(torch.ones_like(outputs[-1]).unsqueeze(1) & x[-1].unsqueeze(0))
 
-        output_reachability = torch.stack(outputs, dim=0)
-        return output_reachability.reshape(*original_shape[:-1], out_features)
+        self._forward_reachability.copy_((torch.ones_like(outputs[-1]).unsqueeze(1) & x[-1].unsqueeze(0)).bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
+        output_reachability = torch.stack(outputs, dim=0).reshape(*original_shape[:-1], out_features)
+
+        return output_reachability
 
     def backward_pass(self, output_connectivity: torch.Tensor) -> torch.Tensor:
         original_shape = output_connectivity.shape
         in_features = self.mask.shape[1]
         out_features = self.mask.shape[0]
 
+        # MLP-Mixer requires some additional logic to make it work properly
         x = output_connectivity.reshape(-1, out_features)
-
         inputs = []
         for sample in x:
             in_reach = (self.mask.to(torch.bool) & sample.unsqueeze(1)).any(dim=0)
             inputs.append(in_reach)
-        self.backward_reachability.copy_(x[-1].unsqueeze(1) & torch.ones_like(inputs[-1]).unsqueeze(0))
 
-        input_reachability = torch.stack(inputs, dim=0)
-        return input_reachability.reshape(*original_shape[:-1], in_features)
+        self._backward_reachability.copy_((x[-1].unsqueeze(1) & torch.ones_like(inputs[-1]).unsqueeze(0)).bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
+        input_reachability = torch.stack(inputs, dim=0).reshape(*original_shape[:-1], in_features)
+
+        return input_reachability
 
 class MaskedConv2D(MaskedLayer):
 
@@ -159,8 +173,8 @@ class MaskedConv2D(MaskedLayer):
         H_out = (H_in + 2 * self.layer.padding[0] - self.layer.dilation[0] * (self.layer.kernel_size[0] - 1) - 1) // self.layer.stride[0] + 1
         W_out = (W_in + 2 * self.layer.padding[1] - self.layer.dilation[1] * (self.layer.kernel_size[1] - 1) - 1) // self.layer.stride[1] + 1
 
+        self._forward_reachability.copy_(self.mask.clone().bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
         output_reachability = torch.ones((self.layer.out_channels, H_out, W_out), dtype=torch.bool, device=input_connectivity.device)
-        self.forward_reachability.copy_(self.mask.bool().clone())
 
         return output_reachability
 
@@ -171,8 +185,8 @@ class MaskedConv2D(MaskedLayer):
         H_in = (H_out - 1) * self.layer.stride[0] - 2 * self.layer.padding[0] + self.layer.dilation[0] * (kernel_h - 1) + 1
         W_in = (W_out - 1) * self.layer.stride[1] - 2 * self.layer.padding[1] + self.layer.dilation[1] * (kernel_w - 1) + 1
 
+        self._backward_reachability.copy_(self.mask.clone().bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
         input_reachability = torch.ones((in_channels, H_in, W_in), dtype=torch.bool, device=output_connectivity.device)
-        self.backward_reachability.copy_(self.mask.bool().clone())
 
         return input_reachability
 

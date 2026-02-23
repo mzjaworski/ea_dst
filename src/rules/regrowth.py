@@ -95,7 +95,7 @@ class GuidedUniformRegrowth(Regrowth):
     def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
 
         mask = layer.mask.data
-        guidance = layer.forward_reachability.to(torch.bool) & layer.backward_reachability.to(torch.bool)
+        guidance = layer.functional_reachability
 
         flat_mask = mask.view(-1)
         flat_guidance = guidance.view(-1)

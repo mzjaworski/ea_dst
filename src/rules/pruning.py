@@ -43,7 +43,7 @@ class GuidedMagnitudePruning(Pruning):
     def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
         weight = layer.layer.weight.data
         original_mask = layer.mask.data
-        guidance = layer.forward_reachability.to(torch.bool) & layer.backward_reachability.to(torch.bool)
+        guidance = layer.functional_reachability
 
         flat_weight = weight.view(-1)
         flat_mask = original_mask.view(-1)
