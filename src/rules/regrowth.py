@@ -126,3 +126,46 @@ class GuidedUniformRegrowth(Regrowth):
 
         return layer
 
+class GuidedGradientRegrowth(Regrowth):
+
+    def __init__(self, decay_rate: float, weight_reinitialization: str = "zero"):
+        self.decay_rate = decay_rate
+        self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
+
+    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
+        weight = layer.layer.weight
+        original_mask = layer.mask.data
+
+        if weight.grad is None:
+            raise RuntimeError("Gradient of the weights is required for GradientRegrowth, but it is None.")
+
+        grad = weight.grad.data
+        guidance = layer.functional_reachability
+
+        flat_grad = grad.view(-1)
+        flat_mask = original_mask.view(-1)
+        flat_guidance = guidance.view(-1)
+
+        # get indices of inactive elements
+        inactive_idx = (flat_mask == 0).nonzero(as_tuple=True)[0]
+        if inactive_idx.numel() == 0:
+            return layer
+
+        # score by gradient magnitude
+        scores = flat_grad[inactive_idx].abs() * flat_guidance[inactive_idx]
+
+        # sort descending to satisfy soft_top_k assumption
+        sorted_scores, order = torch.sort(scores, descending=True)
+        sorted_indices = inactive_idx[order]
+
+        # apply soft_top_k to sorted scores
+        sel_mask = src.utilities.soft_top_k(sorted_scores, select=pruned_count, decay_rate=self.decay_rate)
+        grow = sorted_indices[sel_mask]
+
+        # update mask
+        flat_mask[grow] = 1
+
+        layer.mask.data = flat_mask.view_as(original_mask)
+        layer.layer.weight.data = self.reinitialization(weight.data, grow)
+
+        return layer

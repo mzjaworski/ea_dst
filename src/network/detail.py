@@ -85,7 +85,10 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
 
     @property
     def functional_reachability(self) -> torch.Tensor:
-        return self.forward_reachability & self.backward_reachability
+        functional = self.forward_reachability & self.backward_reachability
+        if torch.sum(functional) == 0:
+            functional = self.forward_reachability | self.backward_reachability
+        return functional
 
 class MaskedLinear(MaskedLayer):
 
@@ -116,7 +119,7 @@ class MaskedLinear(MaskedLayer):
             out_reach = (self.mask.to(torch.bool) & sample.unsqueeze(0)).any(dim=1)
             outputs.append(out_reach)
 
-        self._forward_reachability.copy_((torch.ones_like(outputs[-1]).unsqueeze(1) & x[-1].unsqueeze(0)).bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
+        self._forward_reachability.copy_((torch.ones_like(outputs[-1]).unsqueeze(1) & x.any(dim=0).unsqueeze(0)).bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
         output_reachability = torch.stack(outputs, dim=0).reshape(*original_shape[:-1], out_features)
 
         return output_reachability
@@ -133,7 +136,7 @@ class MaskedLinear(MaskedLayer):
             in_reach = (self.mask.to(torch.bool) & sample.unsqueeze(1)).any(dim=0)
             inputs.append(in_reach)
 
-        self._backward_reachability.copy_((x[-1].unsqueeze(1) & torch.ones_like(inputs[-1]).unsqueeze(0)).bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
+        self._backward_reachability.copy_((x.any(dim=0).unsqueeze(1) & torch.ones_like(inputs[-1]).unsqueeze(0)).bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
         input_reachability = torch.stack(inputs, dim=0).reshape(*original_shape[:-1], in_features)
 
         return input_reachability
