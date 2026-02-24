@@ -29,13 +29,12 @@ import src.network.detail
 
 class MLP(torch.nn.Module, src.network.detail.Graph):
 
-    def __init__(self, num_features, expansion_factor):
+    def __init__(self, num_features: int, hidden_size: int):
         super().__init__()
-        num_hidden = num_features * expansion_factor
-        self.fc1 = src.network.detail.MaskedLinear(torch.nn.Linear(num_features, num_hidden))
+        self.fc1 = src.network.detail.MaskedLinear(torch.nn.Linear(num_features, hidden_size))
         self.act1 = torch.nn.GELU()
-        self.norm1 = torch.nn.LayerNorm(num_hidden)
-        self.fc2 = src.network.detail.MaskedLinear(torch.nn.Linear(num_hidden, num_features))
+        self.norm1 = torch.nn.LayerNorm(hidden_size)
+        self.fc2 = src.network.detail.MaskedLinear(torch.nn.Linear(hidden_size, num_features))
 
     def forward(self, x):
         x = self.act1(self.fc1(x))
@@ -56,10 +55,10 @@ class MLP(torch.nn.Module, src.network.detail.Graph):
 
 class TokenMixer(torch.nn.Module, src.network.detail.Graph):
 
-    def __init__(self, num_features, num_patches, expansion_factor):
+    def __init__(self, num_features: int, num_patches: int, hidden_size: int):
         super().__init__()
         self.norm = torch.nn.LayerNorm(num_features)
-        self.mlp = MLP(num_patches, expansion_factor)
+        self.mlp = MLP(num_patches, hidden_size)
 
     def forward(self, x):
         residual = x
@@ -89,10 +88,10 @@ class TokenMixer(torch.nn.Module, src.network.detail.Graph):
 
 class ChannelMixer(torch.nn.Module, src.network.detail.Graph):
 
-    def __init__(self, num_features, num_patches, expansion_factor):
+    def __init__(self, num_features: int, hidden_size: int):
         super().__init__()
         self.norm = torch.nn.LayerNorm(num_features)
-        self.mlp = MLP(num_features, expansion_factor)
+        self.mlp = MLP(num_features, hidden_size)
 
     def forward(self, x):
         # x.shape == (batch_size, num_patches, num_features)
@@ -117,10 +116,10 @@ class ChannelMixer(torch.nn.Module, src.network.detail.Graph):
 
 class MixerLayer(torch.nn.Module, src.network.detail.Graph):
 
-    def __init__(self, num_features, num_patches, expansion_factor):
+    def __init__(self, num_features: int, num_patches: int, token_hidden: int, mixer_hidden: int):
         super().__init__()
-        self.token_mixer = TokenMixer(num_features, num_patches, expansion_factor)
-        self.channel_mixer = ChannelMixer(num_features, num_patches, expansion_factor)
+        self.token_mixer = TokenMixer(num_features, num_patches, token_hidden)
+        self.channel_mixer = ChannelMixer(num_features, mixer_hidden)
 
     def forward(self, x):
         x = self.token_mixer(x)
@@ -143,9 +142,8 @@ def check_sizes(image_size, patch_size):
     num_patches = sqrt_num_patches ** 2
     return num_patches
 
-
 class MLPMixer(src.network.detail.NetworkInterface, src.network.detail.Graph):
-    def __init__(self, image_size: int = 256, patch_size: int = 16, in_channels: int = 3, num_features: int = 128, expansion_factor: float = 2, num_layers: int = 8, num_classes: int = 10, sparsity: float = 0.0, method: str = 'uniform'):
+    def __init__(self, image_size: int = 256, patch_size: int = 16, in_channels: int = 3, num_features: int = 128, token_hidden: int = 256, mixer_hidden: int = 128, num_layers: int = 8, num_classes: int = 10, sparsity: float = 0.0, method: str = 'uniform'):
         super().__init__()
         num_patches = check_sizes(image_size, patch_size)
 
@@ -154,7 +152,7 @@ class MLPMixer(src.network.detail.NetworkInterface, src.network.detail.Graph):
         self.num_classes = num_classes
 
         self.patcher = src.network.detail.MaskedConv2D(torch.nn.Conv2d(in_channels, num_features, kernel_size=patch_size, stride=patch_size))
-        self.mixers = torch.nn.ModuleList([MixerLayer(num_features, num_patches, expansion_factor) for _ in range(num_layers)])
+        self.mixers = torch.nn.ModuleList([MixerLayer(num_features, num_patches, token_hidden, mixer_hidden) for _ in range(num_layers)])
         self.classifier = src.network.detail.MaskedLinear(torch.nn.Linear(num_features, num_classes))
         src.network.detail.initialize_masks(self, method=method, sparsity=sparsity)
 
@@ -202,3 +200,28 @@ class MLPMixer(src.network.detail.NetworkInterface, src.network.detail.Graph):
 
         self.forward_pass(forward)
         self.backward_pass(backward)
+
+# convenience constructors
+def mixer_s32(image_size: int = 224, num_classes: int = 200, sparsity: float = 0.0, method: str = 'uniform'):
+    return MLPMixer(image_size=image_size, patch_size=32, num_layers=8, num_features=512, token_hidden=256, mixer_hidden=2048, num_classes=num_classes, sparsity=sparsity, method=method)
+
+def mixer_s16(image_size: int = 224, num_classes: int = 200, sparsity: float = 0.0, method: str = 'uniform'):
+    return MLPMixer(image_size=image_size, patch_size=16, num_layers=8, num_features=512, token_hidden=256, mixer_hidden=2048, num_classes=num_classes, sparsity=sparsity, method=method)
+
+def mixer_s32a(image_size: int = 224, num_classes: int = 200, sparsity: float = 0.0, method: str = 'uniform'):
+    return MLPMixer(image_size=image_size, patch_size=32, num_layers=9, num_features=512, token_hidden=256, mixer_hidden=2048, num_classes=num_classes, sparsity=sparsity, method=method)
+
+def mixer_b32(image_size: int = 224, num_classes: int = 200, sparsity: float = 0.0, method: str = 'uniform'):
+    return MLPMixer(image_size=image_size, patch_size=32, num_layers=12, num_features=768, token_hidden=384, mixer_hidden=3072, num_classes=num_classes, sparsity=sparsity, method=method)
+
+def mixer_b16(image_size: int = 224, num_classes: int = 200, sparsity: float = 0.0, method: str = 'uniform'):
+    return MLPMixer(image_size=image_size, patch_size=16, num_layers=12, num_features=768, token_hidden=384, mixer_hidden=3072, num_classes=num_classes, sparsity=sparsity, method=method)
+
+def mixer_l32(image_size: int = 224, num_classes: int = 200, sparsity: float = 0.0, method: str = 'uniform'):
+    return MLPMixer(image_size=image_size, patch_size=32, num_layers=24, num_features=1024, token_hidden=512, mixer_hidden=4096, num_classes=num_classes, sparsity=sparsity, method=method)
+
+def mixer_l16(image_size: int = 224, num_classes: int = 200, sparsity: float = 0.0, method: str = 'uniform'):
+    return MLPMixer(image_size=image_size, patch_size=16, num_layers=24, num_features=1024, token_hidden=512, mixer_hidden=4096, num_classes=num_classes, sparsity=sparsity, method=method)
+
+def mixer_h14(image_size: int = 224, num_classes: int = 200, sparsity: float = 0.0, method: str = 'uniform'):
+    return MLPMixer(image_size=image_size, patch_size=14, num_layers=32, num_features=1280, token_hidden=640, mixer_hidden=5120, num_classes=num_classes,sparsity=sparsity, method=method)
