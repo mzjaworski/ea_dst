@@ -71,7 +71,7 @@ def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
     model.neuron_dormancy = []
     return model
 
-def print_reachability(model: torch.nn.Module) -> None:
+def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]]:
     modules = [module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)]
     edge_reachabilities = []
 
@@ -81,21 +81,24 @@ def print_reachability(model: torch.nn.Module) -> None:
         functional_reachability = torch.sum((module.forward_reachability.to(torch.bool) & module.backward_reachability.to(torch.bool)) * module.mask != 0).item() / module.active_weights()
         edge_reachabilities.append((forward_reachability, backward_reachability, functional_reachability))
 
-    print(edge_reachabilities)
+    return edge_reachabilities
 
 # instantiates network with all statistics to track
-def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device) -> torch.nn.Module:
+def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device, cycles: int) -> torch.nn.Module:
     model = model_factory().to(device)
 
     if parent is not None:
         model.load_state_dict(parent.state_dict(), strict=False)
 
-    with torch.no_grad():
-        model.compute_reachabilities() # this one is necessary
-    model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
-    with torch.no_grad():
-        model.compute_reachabilities() # this one is just for logging
-        print_reachability(model)
+    for cycle in range(cycles):
+        print(f"# ---------------------- cycle {cycle} ---------------------- #")
+        with torch.no_grad():
+            model.compute_reachabilities() # this one is necessary
+            print(f"before: {edge_reachability(model)}")
+        model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
+        with torch.no_grad():
+            model.compute_reachabilities() # this one is just for logging
+            print(f"after: {edge_reachability(model)}")
 
     model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
     model = reset_tracked_fields(model)

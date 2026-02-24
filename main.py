@@ -35,7 +35,7 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: floa
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], decay_strategy: src.rules.decay.DecayStrategy,
-                device: torch.device, epochs: int, offspring: int, minibatch_budget: int):
+                device: torch.device, epochs: int, offspring: int, minibatch_budget: int, warmup: int):
     statistics = training_utilities.initialize_statistics()
 
     fitness_function = lambda c: c.rank
@@ -74,9 +74,13 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
                     if current_epoch == 1:
-                        child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, None, None, train_loader, minibatch_budget, device)
+                        pruning = [pruning_strategies[0]] if len(pruning_strategies) > 1 else pruning_strategies
+                        regrowth = [regrowth_strategies[0]] if len(regrowth_strategies) > 1 else regrowth_strategies
+                        child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning, regrowth, train_loader, minibatch_budget, device, cycles=warmup)
                     else:
-                        child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device)
+                        pruning = [pruning_strategies[1]] if len(pruning_strategies) > 1 else pruning_strategies
+                        regrowth = [regrowth_strategies[1]] if len(regrowth_strategies) > 1 else regrowth_strategies
+                        child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning, regrowth, train_loader, minibatch_budget, device, cycles=1)
                     child.index = child_index
                     children.append(child)
 
