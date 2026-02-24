@@ -118,6 +118,9 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
 
     model.lr_decay = lr_decay_factory(model.optimizer)
 
+    if parent is not None:
+        model.lr_decay.load_state_dict(parent.lr_decay.state_dict())
+
     return model
 
 # helper for running forward/backward pass that computes all scores
