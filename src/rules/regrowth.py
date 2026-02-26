@@ -87,15 +87,23 @@ class GradientRegrowth(Regrowth):
 
 class GuidedUniformRegrowth(Regrowth):
 
-    def __init__(self, weight_reinitialization: str = "xavier_uniform", guidance_boost: float = 100.0):
+    def __init__(self, weight_reinitialization: str = "xavier_uniform", guidance_boost: float = 100.0, mode: str = "functional"):
         assert guidance_boost >= 1.0
         self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
         self.guidance_boost = guidance_boost
+        self.accessor = {
+            "forward": lambda layer: layer.forward_reachability,
+            "backward": lambda layer: layer.backward_reachability,
+            "functional": lambda layer: layer.functional_reachability,
+            "nonfunctional": lambda layer: (layer.forward_reachability | layer.backward_reachability) & (~layer.functional_reachability),
+            "dead": lambda layer: ~(layer.forward_reachability | layer.backward_reachability),
+            "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
+        }[mode]
 
     def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
 
         mask = layer.mask.data
-        guidance = layer.functional_reachability
+        guidance = self.accessor(layer)
 
         flat_mask = mask.view(-1)
         flat_guidance = guidance.view(-1)
@@ -128,9 +136,17 @@ class GuidedUniformRegrowth(Regrowth):
 
 class GuidedGradientRegrowth(Regrowth):
 
-    def __init__(self, decay_rate: float, weight_reinitialization: str = "zero"):
+    def __init__(self, decay_rate: float, weight_reinitialization: str = "zero", mode: str = "functional"):
         self.decay_rate = decay_rate
         self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
+        self.accessor = {
+            "forward": lambda layer: layer.forward_reachability,
+            "backward": lambda layer: layer.backward_reachability,
+            "functional": lambda layer: layer.functional_reachability,
+            "nonfunctional": lambda layer: (layer.forward_reachability | layer.backward_reachability) & (~layer.functional_reachability),
+            "dead": lambda layer: ~(layer.forward_reachability | layer.backward_reachability),
+            "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
+        }[mode]
 
     def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
         weight = layer.layer.weight
@@ -140,7 +156,7 @@ class GuidedGradientRegrowth(Regrowth):
             raise RuntimeError("Gradient of the weights is required for GradientRegrowth, but it is None.")
 
         grad = weight.grad.data
-        guidance = layer.functional_reachability
+        guidance = self.accessor(layer)
 
         flat_grad = grad.view(-1)
         flat_mask = original_mask.view(-1)

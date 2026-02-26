@@ -23,8 +23,8 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: floa
     loss = numpy.array([c.composite_loss for c in candidates])
     diff = numpy.abs(numpy.diff(loss, axis=1))
 
-    pop_loss = numpy.median(loss, axis=0)
-    pop_diff = numpy.median(diff, axis=0)
+    pop_loss = numpy.mean(loss, axis=0)
+    pop_diff = numpy.mean(diff, axis=0)
 
     for i, c in enumerate(candidates):
         level = loss[i][1:] / (pop_loss[1:] + eps)
@@ -35,15 +35,20 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: floa
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], decay_strategy: src.rules.decay.DecayStrategy,
-                device: torch.device, epochs: int, offspring: int, minibatch_budget: int, warmup: int):
+                device: torch.device, epochs: int, parents: int, offspring: int, minibatch_budget: int, warmup: int):
     statistics = training_utilities.initialize_statistics()
 
     fitness_function = lambda c: c.rank
     criterion = criterion_factory()
     alpha = 1.0
 
-    children = []
+    children = [training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, None, warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device, cycles=warmup) for _ in range(parents)]
+    for child_index, child in enumerate(children):
+        child.index = child_index
+
     for current_epoch in range(1, epochs + 1):
+        survivors = []
+
         statistics["current_epoch"] += 1
         statistics["epoch_start"] = time.perf_counter()
 
@@ -61,26 +66,20 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
             # update population
             if (statistics["total_batches"] / offspring) % minibatch_budget == 0:
-                best_model = None
 
                 # pick best model
                 if len(children):
                     children = rank_models(children, alpha=alpha)
                     children.sort(key=fitness_function)
-                    best_model = children[0]
+                    print([(child.index, fitness_function(child)) for child in children])
                     statistics["amortized_flops"] += numpy.sum([(child.amortized_sample_cost * train_loader.batch_size * child.seen_batches) + child.constant_cost for child in children])
+                    survivors = children[:parents]
                     children = []
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
-                    if current_epoch == 1:
-                        pruning = [pruning_strategies[0]] if len(pruning_strategies) > 1 else pruning_strategies
-                        regrowth = [regrowth_strategies[0]] if len(regrowth_strategies) > 1 else regrowth_strategies
-                        child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning, regrowth, train_loader, minibatch_budget, device, cycles=warmup)
-                    else:
-                        pruning = [pruning_strategies[1]] if len(pruning_strategies) > 1 else pruning_strategies
-                        regrowth = [regrowth_strategies[1]] if len(regrowth_strategies) > 1 else regrowth_strategies
-                        child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, best_model, warmup_strategy, pruning, regrowth, train_loader, minibatch_budget, device, cycles=1)
+                    survivor_index = numpy.random.randint(0, len(survivors))
+                    child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, survivors[survivor_index], warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device, cycles=1)
                     child.index = child_index
                     children.append(child)
 

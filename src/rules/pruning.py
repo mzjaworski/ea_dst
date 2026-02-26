@@ -33,17 +33,25 @@ class NullPruning(Pruning):
 
 class GuidedMagnitudePruning(Pruning):
 
-    def __init__(self, pruned_fraction: float, decay_rate: float):
+    def __init__(self, pruned_fraction: float, decay_rate: float, mode: str = "functional"):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
             raise ValueError("pruned_fraction must be in [0.0, 1.0]")
 
         self._pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
+        self.accessor = {
+            "forward": lambda layer: layer.forward_reachability,
+            "backward": lambda layer: layer.backward_reachability,
+            "functional": lambda layer: layer.functional_reachability,
+            "nonfunctional": lambda layer: (layer.forward_reachability | layer.backward_reachability) & (~layer.functional_reachability),
+            "dead": lambda layer: ~(layer.forward_reachability | layer.backward_reachability),
+            "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
+        }[mode]
 
     def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
         weight = layer.layer.weight.data
         original_mask = layer.mask.data
-        guidance = layer.functional_reachability
+        guidance = self.accessor(layer)
 
         flat_weight = weight.view(-1)
         flat_mask = original_mask.view(-1)

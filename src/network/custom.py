@@ -36,7 +36,7 @@ class SparseANN(src.network.detail.NetworkInterface):
         src.network.detail.initialize_masks(self, method=method, sparsity=sparsity)
 
     def forward(self, x) -> torch.Tensor:
-        return self.model(x)
+        return self.model(torch.flatten(x, start_dim=1))
 
     def compute_reachabilities(self):
         modules = [layer for layer in self.modules() if isinstance(layer, src.network.detail.MaskedLayer)]
@@ -83,7 +83,7 @@ class DenseANNFromSparseANN(src.network.detail.NetworkInterface):
         self.model = torch.nn.Sequential(*layers)
 
     def forward(self, x) -> torch.Tensor:
-        return self.model(x)
+        return self.model(torch.flatten(x, start_dim=1))
 
     def compute_reachabilities(self):
         modules = [layer for layer in self.modules() if isinstance(layer, src.network.detail.MaskedLayer)]

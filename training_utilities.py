@@ -38,17 +38,30 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
 
     # iterate over all layers
     if pruning_strategies is not None and regrowth_strategies is not None:
-        for layer in model.modules():
+        reversed_order = bool(numpy.random.randint(0, 2))
+        modules = list(model.modules())
+        for layer in (reversed(modules) if reversed_order else modules):
             # we are interested only in custom MaskedLayers
             if not isinstance(layer, src.network.detail.MaskedLayer):
                 continue
 
+            with torch.no_grad():
+                model.compute_reachabilities()
+                # print(f"before: {edge_reachability(model)}")
+
             # apply removal/regrowth only for layers that actually require it
             if layer.realized_sparsity() < 1.0:
-                for (prunning_strategy, regrowth_strategy) in zip(pruning_strategies, regrowth_strategies):
-                    pruned_count, pruned_layer = prunning_strategy.apply(layer)
-                    regrowth_strategy.apply(pruned_count, pruned_layer)
-                    # not assigning back should be safe as we deal with references
+
+                # draw random strategy from the supplied list
+                pruning_index = numpy.random.randint(0, len(pruning_strategies))
+                regrowth_index = numpy.random.randint(0, len(regrowth_strategies))
+
+                pruned_count, pruned_layer = pruning_strategies[pruning_index].apply(layer)
+                regrowth_strategies[regrowth_index].apply(pruned_count, pruned_layer)
+                # not assigning back should be safe as we deal with references
+
+    with torch.no_grad():
+        model.compute_reachabilities()
 
     return model
 
@@ -91,14 +104,7 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
         model.load_state_dict(parent.state_dict(), strict=False)
 
     for cycle in range(cycles):
-        print(f"# ---------------------- cycle {cycle} ---------------------- #")
-        with torch.no_grad():
-            model.compute_reachabilities() # this one is necessary
-            print(f"before: {edge_reachability(model)}")
         model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
-        with torch.no_grad():
-            model.compute_reachabilities() # this one is just for logging
-            print(f"after: {edge_reachability(model)}")
 
     model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
     model = reset_tracked_fields(model)
@@ -124,7 +130,7 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
     return model
 
 # helper for running forward/backward pass that computes all scores
-def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict) -> Tuple[torch.nn.Module, Dict]:
+def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterion: torch.nn.Module, input: torch.Tensor, targets: torch.Tensor, statistics: Dict) -> Tuple[List[torch.nn.Module], Dict]:
     logits = []
     for model in models:
         statistics["total_batches"] += 1

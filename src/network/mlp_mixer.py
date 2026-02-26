@@ -146,6 +146,7 @@ class MLPMixer(src.network.detail.NetworkInterface, src.network.detail.Graph):
     def __init__(self, image_size: int = 256, patch_size: int = 16, in_channels: int = 3, num_features: int = 128, token_hidden: int = 256, mixer_hidden: int = 128, num_layers: int = 8, num_classes: int = 10, sparsity: float = 0.0, method: str = 'uniform'):
         super().__init__()
         num_patches = check_sizes(image_size, patch_size)
+        print(num_patches)
 
         self.image_size = image_size
         self.in_channels = in_channels
