@@ -54,7 +54,22 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                 pruning_index = numpy.random.randint(0, len(pruning_strategies))
                 regrowth_index = numpy.random.randint(0, len(regrowth_strategies))
 
+                # remove weights
                 pruned_count, pruned_layer = pruning_strategies[pruning_index].apply(layer)
+
+                # zero out momentum for inactive weights - this way regrown weights do not inherit parents momentum state
+                param = layer.layer.weight
+                if param in model.optimizer.state:
+                    state = model.optimizer.state[param]
+
+                    if state is None or 'momentum_buffer' not in state:
+                        continue
+
+                    buffer = state['momentum_buffer'].view(-1)
+                    buffer[(~layer.mask.bool()).view(-1).nonzero(as_tuple=True)[0]] = 0
+                    state['momentum_buffer'] = buffer.view_as(param)
+
+                # regrow weights
                 regrowth_strategies[regrowth_index].apply(pruned_layer, pruned_count)
                 # not assigning back should be safe as we deal with references
 
@@ -97,15 +112,20 @@ def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]
 # instantiates network with all statistics to track
 def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device, cycles: int) -> torch.nn.Module:
     model = model_factory().to(device)
+    model.optimizer = optimizer_factory(model)
+    model.lr_decay = lr_decay_factory(model.optimizer)
 
     if parent is not None:
         model.load_state_dict(parent.state_dict(), strict=False)
+        model.optimizer.load_state_dict(parent.optimizer.state_dict())
+        model.lr_decay.load_state_dict(parent.lr_decay.state_dict())
+
+    model = reset_tracked_fields(model)
 
     for cycle in range(cycles):
         model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
 
     model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
-    model = reset_tracked_fields(model)
 
     # fields required to estimate (amortized) FLOPs of operations (slightly adjusted "Rigging the Lottery: Making All Tickets Winners" logic as original idea wouldn't fit here)
     model.amortized_sample_cost = src.utilities.estimate_amortized_flops(model, warmup_strategy, train_loader, minibatch_budget)
@@ -113,17 +133,6 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
     model.seen_batches = 0
 
     model.train()
-
-    # fields related to optimization state
-    model.optimizer = optimizer_factory(model)
-
-    if parent is not None:
-        model.optimizer.load_state_dict(parent.optimizer.state_dict())
-
-    model.lr_decay = lr_decay_factory(model.optimizer)
-
-    if parent is not None:
-        model.lr_decay.load_state_dict(parent.lr_decay.state_dict())
 
     return model
 

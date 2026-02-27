@@ -55,11 +55,6 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         for pruning_strategy in pruning_strategies:
             pruning_strategy.decay_pruned_fraction(decay_strategy.update(0)) # update fraction
 
-        # apply learning rate decay to children
-        if len(children):
-            for child in children:
-                child.lr_decay.step()
-
         # train for one epoch
         for batch_index, (inputs, targets) in enumerate(train_loader):
             inputs, targets = inputs.to(device), targets.to(device)
@@ -85,6 +80,11 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
             # train population
             children, statistics = training_utilities.forward_and_backward_with_statistics(children, criterion, inputs, targets, statistics)
+
+        # apply learning rate decay to children - doing it here prevents pytorch warnings
+        if len(children):
+            for child in children:
+                child.lr_decay.step()
 
         # log epoch end time
         statistics["epoch_end"] = time.perf_counter()
