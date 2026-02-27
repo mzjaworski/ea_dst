@@ -7,6 +7,7 @@ import src.utilities
 
 import torch
 import numpy
+import math
 
 def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoader, device: torch.device, top_k: list[int]) -> dict[str, float]:
     max_k = max(top_k)
@@ -38,12 +39,10 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
 
     # iterate over all layers
     if pruning_strategies is not None and regrowth_strategies is not None:
+        modules = list([module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)])
         reversed_order = bool(numpy.random.randint(0, 2))
-        modules = list(model.modules())
+
         for layer in (reversed(modules) if reversed_order else modules):
-            # we are interested only in custom MaskedLayers
-            if not isinstance(layer, src.network.detail.MaskedLayer):
-                continue
 
             with torch.no_grad():
                 model.compute_reachabilities()
@@ -51,13 +50,12 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
 
             # apply removal/regrowth only for layers that actually require it
             if layer.realized_sparsity() < 1.0:
-
                 # draw random strategy from the supplied list
                 pruning_index = numpy.random.randint(0, len(pruning_strategies))
                 regrowth_index = numpy.random.randint(0, len(regrowth_strategies))
 
                 pruned_count, pruned_layer = pruning_strategies[pruning_index].apply(layer)
-                regrowth_strategies[regrowth_index].apply(pruned_count, pruned_layer)
+                regrowth_strategies[regrowth_index].apply(pruned_layer, pruned_count)
                 # not assigning back should be safe as we deal with references
 
     with torch.no_grad():

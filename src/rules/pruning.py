@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, Optional
 import torch
 
 import src.utilities
@@ -9,7 +9,7 @@ import src.rules.decay
 class Pruning(ABC):
 
     @abstractmethod
-    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]: # (pruned_count, pruned_layer)
+    def apply(self, layer: src.network.detail.MaskedLayer, prune_count: Optional[int] = None) -> Tuple[int, src.network.detail.MaskedLayer]: # (pruned_count, pruned_layer)
         pass
 
     @abstractmethod
@@ -22,7 +22,7 @@ class Pruning(ABC):
 
 class NullPruning(Pruning):
 
-    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer, prune_count: Optional[int] = None) -> Tuple[int, src.network.detail.MaskedLayer]:
         return 0, layer
 
     def pruned_fraction(self) -> float:
@@ -48,7 +48,7 @@ class GuidedMagnitudePruning(Pruning):
             "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
         }[mode]
 
-    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer, prune_count: Optional[int] = None) -> Tuple[int, src.network.detail.MaskedLayer]:
         weight = layer.layer.weight.data
         original_mask = layer.mask.data
         guidance = self.accessor(layer)
@@ -64,7 +64,7 @@ class GuidedMagnitudePruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        pruned_count = max(int(self._pruned_fraction * total_active), 1)
+        pruned_count = max(int(self._pruned_fraction * total_active), 1) if prune_count is None else prune_count
 
         # select weights to remove
         mags = flat_weight[active_neurons].abs() * flat_guidance[active_neurons]
@@ -97,7 +97,7 @@ class MagnitudePruning(Pruning):
         self._pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
 
-    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer, prune_count: Optional[int] = None) -> Tuple[int, src.network.detail.MaskedLayer]:
         weight = layer.layer.weight.data
         original_mask = layer.mask.data
 
@@ -111,7 +111,7 @@ class MagnitudePruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        pruned_count = max(int(self._pruned_fraction * total_active), 1)
+        pruned_count = max(int(self._pruned_fraction * total_active), 1) if prune_count is None else prune_count
 
         # select weights to remove
         mags = flat_weight[active_neurons].abs()
@@ -143,7 +143,7 @@ class UniformPruning(Pruning):
 
         self._pruned_fraction = pruned_fraction
 
-    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer, prune_count: Optional[int] = None) -> Tuple[int, src.network.detail.MaskedLayer]:
         original_mask = layer.mask.data
         flat_mask = original_mask.view(-1)
 
@@ -154,7 +154,7 @@ class UniformPruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        num_pruned = max(int(self._pruned_fraction * total_active), 1)
+        num_pruned = max(int(self._pruned_fraction * total_active), 1) if prune_count is None else prune_count
 
         if num_pruned == 0:
             return 0, layer
@@ -183,7 +183,7 @@ class RSensitivityPruning(Pruning):
         self._pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
 
-    def apply(self, layer: src.network.detail.MaskedLayer) -> Tuple[int, src.network.detail.MaskedLayer]:
+    def apply(self, layer: src.network.detail.MaskedLayer, prune_count: Optional[int] = None) -> Tuple[int, src.network.detail.MaskedLayer]:
         weight = layer.layer.weight
         original_mask = layer.mask.data
 
@@ -203,7 +203,7 @@ class RSensitivityPruning(Pruning):
             return 0, layer
 
         # identify number of weights to remove
-        pruned_count = max(int(self._pruned_fraction * total_active), 1)
+        pruned_count = max(int(self._pruned_fraction * total_active), 1) if prune_count is None else prune_count
 
         # compute sensitivity scores: |w| / |grad|
         abs_weight = flat_weight[active_neurons].abs()

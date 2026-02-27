@@ -8,12 +8,12 @@ import src.rules.weight
 class Regrowth(ABC):
 
     @abstractmethod
-    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer: # regrown_layer
+    def apply(self, layer: src.network.detail.MaskedLayer, pruned_count: int) -> src.network.detail.MaskedLayer: # regrown_layer
         pass
 
 class NullRegrowth(Regrowth):
 
-    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
+    def apply(self, layer: src.network.detail.MaskedLayer, pruned_count: int) -> src.network.detail.MaskedLayer:
         return layer
 
 class UniformRegrowth(Regrowth):
@@ -21,7 +21,7 @@ class UniformRegrowth(Regrowth):
     def __init__(self, weight_reinitialization: str = "xavier_uniform"):
         self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
 
-    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
+    def apply(self, layer: src.network.detail.MaskedLayer, pruned_count: int) -> src.network.detail.MaskedLayer:
         mask = layer.mask.data
 
         flat_mask = mask.view(-1)
@@ -49,7 +49,7 @@ class GradientRegrowth(Regrowth):
         self.decay_rate = decay_rate
         self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
 
-    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
+    def apply(self, layer: src.network.detail.MaskedLayer, pruned_count: int) -> src.network.detail.MaskedLayer:
         weight = layer.layer.weight
         original_mask = layer.mask.data
 
@@ -100,7 +100,7 @@ class GuidedUniformRegrowth(Regrowth):
             "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
         }[mode]
 
-    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
+    def apply(self, layer: src.network.detail.MaskedLayer, pruned_count: int) -> src.network.detail.MaskedLayer:
 
         mask = layer.mask.data
         guidance = self.accessor(layer)
@@ -148,7 +148,7 @@ class GuidedGradientRegrowth(Regrowth):
             "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
         }[mode]
 
-    def apply(self, pruned_count: int, layer: src.network.detail.MaskedLayer) -> src.network.detail.MaskedLayer:
+    def apply(self, layer: src.network.detail.MaskedLayer, pruned_count: int) -> src.network.detail.MaskedLayer:
         weight = layer.layer.weight
         original_mask = layer.mask.data
 
