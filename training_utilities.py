@@ -37,16 +37,15 @@ def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoad
 def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth]) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
 
+    with torch.no_grad():
+        model.compute_reachabilities()
+
     # iterate over all layers
     if pruning_strategies is not None and regrowth_strategies is not None:
         modules = list([module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)])
         reversed_order = bool(numpy.random.randint(0, 2))
 
         for layer in (reversed(modules) if reversed_order else modules):
-
-            with torch.no_grad():
-                model.compute_reachabilities()
-                # print(f"before: {edge_reachability(model)}")
 
             # apply removal/regrowth only for layers that actually require it
             if layer.realized_sparsity() < 1.0:

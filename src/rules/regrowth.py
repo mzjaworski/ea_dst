@@ -87,10 +87,11 @@ class GradientRegrowth(Regrowth):
 
 class GuidedUniformRegrowth(Regrowth):
 
-    def __init__(self, weight_reinitialization: str = "xavier_uniform", guidance_boost: float = 100.0, mode: str = "functional"):
-        assert guidance_boost >= 1.0
+    def __init__(self, weight_reinitialization: str = "xavier_uniform", boost: float = 0.99, mode: str = "functional"):
+        assert 1.0 >= boost >= 0.0
         self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
-        self.guidance_boost = guidance_boost
+        self.boost = boost
+
         self.accessor = {
             "forward": lambda layer: layer.forward_reachability,
             "backward": lambda layer: layer.backward_reachability,
@@ -112,11 +113,15 @@ class GuidedUniformRegrowth(Regrowth):
         if inactive_idx.numel() == 0:
             return layer
 
-        # weights: base = 1, boosted where guidance == True
-        weights = torch.ones(inactive_idx.numel(), device=inactive_idx.device, dtype=torch.float)
+        is_guided = flat_guidance[inactive_idx].bool()
 
-        guided = flat_guidance[inactive_idx].bool()
-        weights[guided] *= self.guidance_boost
+        num_candidates = inactive_idx.numel()
+        guided_count = is_guided.sum()
+        unguided_count = num_candidates - guided_count
+
+        weights = torch.zeros(num_candidates, device=inactive_idx.device, dtype=torch.float)
+        weights[is_guided] = (self.boost / guided_count) if guided_count > 0 else 0.0
+        weights[~is_guided] = ((1.0 - self.boost) / unguided_count) if unguided_count > 0 else 0.0
 
         # handle pruned_count > available
         k = min(pruned_count, inactive_idx.numel())
