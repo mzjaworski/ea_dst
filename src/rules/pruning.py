@@ -5,6 +5,7 @@ import torch
 import src.utilities
 import src.network.detail
 import src.rules.decay
+import src.rules.reachability
 
 class Pruning(ABC):
 
@@ -37,16 +38,9 @@ class GuidedMagnitudePruning(Pruning):
         if pruned_fraction < 0.0 or pruned_fraction > 1.0:
             raise ValueError("pruned_fraction must be in [0.0, 1.0]")
 
+        self.accessor = src.rules.reachability.Reachability.lookup(mode)
         self._pruned_fraction = pruned_fraction
         self.decay_rate = decay_rate
-        self.accessor = {
-            "forward": lambda layer: layer.forward_reachability,
-            "backward": lambda layer: layer.backward_reachability,
-            "functional": lambda layer: layer.functional_reachability,
-            "nonfunctional": lambda layer: (layer.forward_reachability | layer.backward_reachability) & (~layer.functional_reachability),
-            "dead": lambda layer: ~(layer.forward_reachability | layer.backward_reachability),
-            "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
-        }[mode]
 
     def apply(self, layer: src.network.detail.MaskedLayer, prune_count: Optional[int] = None) -> Tuple[int, src.network.detail.MaskedLayer]:
         weight = layer.layer.weight.data

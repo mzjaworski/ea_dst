@@ -83,13 +83,6 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
     def backward_reachability(self) -> torch.Tensor:
         return self._backward_reachability.clone().to(torch.bool).to_dense()
 
-    @property
-    def functional_reachability(self) -> torch.Tensor:
-        functional = self.forward_reachability & self.backward_reachability
-        if torch.sum(functional) == 0:
-            functional = self.forward_reachability | self.backward_reachability
-        return functional
-
 class MaskedLinear(MaskedLayer):
 
     def __init__(self, layer: torch.nn.Linear):

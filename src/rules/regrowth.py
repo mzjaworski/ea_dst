@@ -4,6 +4,7 @@ import torch
 import src.utilities
 import src.network.detail
 import src.rules.weight
+import src.rules.reachability
 
 class Regrowth(ABC):
 
@@ -90,16 +91,8 @@ class GuidedUniformRegrowth(Regrowth):
     def __init__(self, weight_reinitialization: str = "xavier_uniform", boost: float = 0.99, mode: str = "functional"):
         assert 1.0 >= boost >= 0.0
         self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
+        self.accessor = src.rules.reachability.Reachability.lookup(mode)
         self.boost = boost
-
-        self.accessor = {
-            "forward": lambda layer: layer.forward_reachability,
-            "backward": lambda layer: layer.backward_reachability,
-            "functional": lambda layer: layer.functional_reachability,
-            "nonfunctional": lambda layer: (layer.forward_reachability | layer.backward_reachability) & (~layer.functional_reachability),
-            "dead": lambda layer: ~(layer.forward_reachability | layer.backward_reachability),
-            "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
-        }[mode]
 
     def apply(self, layer: src.network.detail.MaskedLayer, pruned_count: int) -> src.network.detail.MaskedLayer:
 
@@ -142,16 +135,9 @@ class GuidedUniformRegrowth(Regrowth):
 class GuidedGradientRegrowth(Regrowth):
 
     def __init__(self, decay_rate: float, weight_reinitialization: str = "zero", mode: str = "functional"):
-        self.decay_rate = decay_rate
         self.reinitialization = src.rules.weight.Reinitialization.lookup(weight_reinitialization)
-        self.accessor = {
-            "forward": lambda layer: layer.forward_reachability,
-            "backward": lambda layer: layer.backward_reachability,
-            "functional": lambda layer: layer.functional_reachability,
-            "nonfunctional": lambda layer: (layer.forward_reachability | layer.backward_reachability) & (~layer.functional_reachability),
-            "dead": lambda layer: ~(layer.forward_reachability | layer.backward_reachability),
-            "combined": lambda layer: (layer.forward_reachability | layer.backward_reachability)
-        }[mode]
+        self.accessor = src.rules.reachability.Reachability.lookup(mode)
+        self.decay_rate = decay_rate
 
     def apply(self, layer: src.network.detail.MaskedLayer, pruned_count: int) -> src.network.detail.MaskedLayer:
         weight = layer.layer.weight
