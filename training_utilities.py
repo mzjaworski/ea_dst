@@ -48,6 +48,7 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
 
             # apply removal/regrowth only for layers that actually require it
             if layer.realized_sparsity() < 1.0:
+
                 # draw random strategy from the supplied list
                 pruning_index = numpy.random.randint(0, len(pruning_strategies))
                 regrowth_index = numpy.random.randint(0, len(regrowth_strategies))
@@ -80,6 +81,9 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
 def update_mask_redistribute(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], noise: float = 0.05) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
 
+    with torch.no_grad():
+        model.compute_reachabilities()
+
     # iterate over all layers
     if pruning_strategies is not None and regrowth_strategies is not None:
         modules = [module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)]
@@ -87,7 +91,7 @@ def update_mask_redistribute(model: torch.nn.Module, warmup_strategy: src.rules.
         modules = list(reversed(modules)) if reversed_order else modules
 
         layer_param_counts = numpy.array([layer.total_weights() for layer in modules], dtype=int)
-        current_active_counts = numpy.array([int(layer.mask.sum().item()) for layer in modules], dtype=int)
+        current_active_counts = numpy.array([int(layer.active_weights()) for layer in modules], dtype=int)
 
         layer_factors = numpy.random.uniform(1.0 - noise, 1.0 + noise, size=len(modules))
         perturbed_float = current_active_counts.astype(float) * layer_factors
@@ -115,9 +119,6 @@ def update_mask_redistribute(model: torch.nn.Module, warmup_strategy: src.rules.
         for layer_index, layer in enumerate(modules):
 
             if layer.realized_sparsity() < 1.0:
-
-                with torch.no_grad():
-                    model.compute_reachabilities()
 
                 pruning_index = numpy.random.randint(0, len(pruning_strategies))
                 regrowth_index = numpy.random.randint(0, len(regrowth_strategies))
@@ -240,7 +241,6 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
 
         # store stats
         with torch.no_grad():
-            model.composite_loss.append(task_loss.item())
             model.median_loss.append(loss.quantile(q=0.5).item())
             model.mean_loss.append(loss.mean().item())
             model.std_loss.append(loss.std().item())
@@ -283,14 +283,16 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
 
         # best member statistics
         "current_best": children[0].index,
+        "best_fitness": children[0].rank,
         "median_loss": numpy.mean(children[0].median_loss),
         "mean_loss": numpy.mean(children[0].mean_loss),
         "std_loss": numpy.mean(children[0].std_loss),
 
         # population statistics
-        "p_median_loss": numpy.mean([numpy.mean(child.median_loss) for child in children]),
-        "p_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
-        "p_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
+        "fitness_std": numpy.std([child.rank for child in children]) if len(children) > 1 else 0.0,
+        "p_m_median_loss": numpy.mean([numpy.mean(child.median_loss) for child in children]),
+        "p_m_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
+        "p_m_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
 
         # miscellaneous
         "realized_sparsity": children[0].realized_sparsity(),

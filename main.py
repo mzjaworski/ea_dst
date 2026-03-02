@@ -16,20 +16,12 @@ import argparse
 import random
 import sys
 
-# import graph_utilities.operations
-
-# magnitude based ordering
-def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: float = 1e-8) -> List[torch.nn.Module]:
-    loss = numpy.array([c.composite_loss for c in candidates])
-    diff = numpy.abs(numpy.diff(loss, axis=1))
-
-    pop_loss = numpy.mean(loss, axis=0)
-    pop_diff = numpy.mean(diff, axis=0)
+def rank_models(candidates: List[torch.nn.Module], eps: float = 1e-8) -> List[torch.nn.Module]:
+    loss = numpy.array([numpy.mean(c.mean_loss) for c in candidates])
+    pop_loss = numpy.mean(loss)
 
     for i, c in enumerate(candidates):
-        level = loss[i][1:] / (pop_loss[1:] + eps)
-        slope = diff[i] / (pop_diff + eps)
-        c.rank = float(numpy.mean(alpha * level + (1.0 - alpha) * slope))
+        c.rank = float(loss[i] / (pop_loss + eps))
 
     return candidates
 
@@ -40,7 +32,6 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
     fitness_function = lambda c: c.rank
     criterion = criterion_factory()
-    alpha = 1.0
 
     children = [training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, None, warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device, cycles=warmup) for _ in range(parents)]
     for child_index, child in enumerate(children):
@@ -64,9 +55,10 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
 
                 # pick best model
                 if len(children):
-                    children = rank_models(children, alpha=alpha)
+                    children = rank_models(children)
                     children.sort(key=fitness_function)
-                    print([(child.index, fitness_function(child)) for child in children])
+                    # print([(child.index, fitness_function(child)) for child in children])
+
                     statistics["amortized_flops"] += numpy.sum([(child.amortized_sample_cost * train_loader.batch_size * child.seen_batches) + child.constant_cost for child in children])
                     survivors = children[:parents]
                     children = []
@@ -93,22 +85,12 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
         statistics["total_time"] += statistics["epoch_end"] - statistics["epoch_start"]
 
         # sort before logging
-        children = rank_models(children, alpha=alpha)
+        children = rank_models(children)
         children.sort(key=fitness_function)
 
         # log statistics
         log_entry = training_utilities.generate_log_entry(statistics, children, train_loader, test_loader, device)
         settings.logger.log(log_entry)
-
-        # if current_epoch == 1:
-        #     graph, total_neurons = graph_utilities.operations.convert_to_graph(children[0])
-        #     graph_utilities.operations.draw_layered_graph(graph, total_neurons, filename="graph_start.png")
-        # if current_epoch == 50:
-        #     graph, total_neurons = graph_utilities.operations.convert_to_graph(children[0])
-        #     graph_utilities.operations.draw_layered_graph(graph, total_neurons, filename="graph_middle.png")
-        # if current_epoch == 100:
-        #     graph, total_neurons = graph_utilities.operations.convert_to_graph(children[0])
-        #     graph_utilities.operations.draw_layered_graph(graph, total_neurons, filename="graph_end.png")
 
     return children
 

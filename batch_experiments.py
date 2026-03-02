@@ -10,6 +10,8 @@ import copy
 import os
 import time
 import subprocess
+import secrets
+import numpy
 
 class GlobalStorage(metaclass=settings.SingletonMeta): # not a good design choice but it will do
     def __init__(self):
@@ -46,9 +48,13 @@ if __name__ == "__main__":
     parser.add_argument('--log_needle', default="LOG_IDENTIFIER", type=str, help='string that will be replaced with run ID')
     parser.add_argument('--runs', default=10, type=int, help='number of parallel experiments to run')
     parser.add_argument('--workers', default=4 * 7, type=int, help='number of parallel workers')
+    parser.add_argument('--seed', default=secrets.randbits(32), type=int, help='training seed (for reproducibility)')
 
     # parse args
     args = parser.parse_args()
+
+    # spawn rng object
+    rng = numpy.random.default_rng(seed=args.seed)
 
     # if no pipeline is passed through command line, scan stdin
     if args.configuration is None:
@@ -85,7 +91,7 @@ if __name__ == "__main__":
                     if "path" in command['serialize']["kwargs"]:
                         command['serialize']["kwargs"]["path"] = replace_all(command['serialize']["kwargs"]["path"], args.log_needle, file_names[run_index])
             
-            command = f"echo '{json.dumps(command)}' | python ./main.py" # not platform-agnostic
+            command = f"echo '{json.dumps(command)}' | python ./main.py --seed={int(rng.integers(0, 2 ** 32 - 1))}" # not platform-agnostic
             commands.append(command)
 
     # run commands in thread pool
