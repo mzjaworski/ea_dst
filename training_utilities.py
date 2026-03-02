@@ -259,7 +259,16 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
 def compute_diversity(logits: torch.Tensor, targets: torch.Tensor) -> float:
     probabilities = torch.softmax(logits, dim=-1)
 
-    true_class_probabilities = (probabilities * targets[:, None, :]).sum(dim=-1)
+    if targets.ndim == 1: # no mixup
+        batch_count, model_count, class_count = logits.shape
+        true_class_probabilities = probabilities[
+            torch.arange(batch_count, device=logits.device)[:, None],
+            torch.arange(model_count, device=logits.device)[None, :],
+            targets[:, None]
+        ]
+    else: # with mixup
+        true_class_probabilities = (probabilities * targets[:, None, :]).sum(dim=-1)
+
     normalization = true_class_probabilities.max(dim=1, keepdim=True).values
     p_tilde = true_class_probabilities / (torch.sqrt(torch.tensor(2.0)) * normalization)
 
@@ -283,13 +292,15 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
 
         # best member statistics
         "current_best": children[0].index,
-        "best_fitness": children[0].rank,
+        "fitness_best": children[0].fitness,
         "median_loss": numpy.mean(children[0].median_loss),
         "mean_loss": numpy.mean(children[0].mean_loss),
         "std_loss": numpy.mean(children[0].std_loss),
 
         # population statistics
-        "fitness_std": numpy.std([child.rank for child in children]) if len(children) > 1 else 0.0,
+        "p_mean_fitness": numpy.mean([child.fitness for child in children]),
+        "p_std_fitness": numpy.std([child.fitness for child in children]),
+
         "p_m_median_loss": numpy.mean([numpy.mean(child.median_loss) for child in children]),
         "p_m_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
         "p_m_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),

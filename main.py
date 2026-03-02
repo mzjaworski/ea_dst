@@ -16,12 +16,14 @@ import argparse
 import random
 import sys
 
-def rank_models(candidates: List[torch.nn.Module], eps: float = 1e-8) -> List[torch.nn.Module]:
+def rank_models(candidates: List[torch.nn.Module], eps: float = 1e-8) -> List[torch.nn.Module]: # ranks using z-score
     loss = numpy.array([numpy.mean(c.mean_loss) for c in candidates])
+
     pop_loss = numpy.mean(loss)
+    pop_std = numpy.std(loss)
 
     for i, c in enumerate(candidates):
-        c.rank = float(loss[i] / (pop_loss + eps))
+        c.fitness = float((loss[i] - pop_loss) / (pop_std + eps))
 
     return candidates
 
@@ -30,7 +32,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 device: torch.device, epochs: int, parents: int, offspring: int, minibatch_budget: int, warmup: int, redistribute: bool = False, noise: float = 0.05):
     statistics = training_utilities.initialize_statistics()
 
-    fitness_function = lambda c: c.rank
+    fitness_function = lambda c: c.fitness
     criterion = criterion_factory()
 
     children = [training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, None, warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device, cycles=warmup) for _ in range(parents)]
