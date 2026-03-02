@@ -191,7 +191,7 @@ class MLPMixer(src.network.detail.NetworkInterface, src.network.detail.Graph):
         x = self.patcher.backward_pass(x)
         return x
 
-    def compute_reachabilities(self):
+    def compute_reachabilities(self) -> None:
         device = next(self.parameters()).device
 
         forward = torch.ones((self.in_channels, self.image_size, self.image_size), dtype=torch.bool).to(device)

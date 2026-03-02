@@ -199,3 +199,7 @@ class NetworkInterface(torch.nn.Module, ABC):
 
     def total_weights(self) -> int:
         return sum([layer.total_weights() for layer in self.modules() if isinstance(layer, MaskedLayer)])
+
+    @abstractmethod
+    def compute_reachabilities(self) -> None:
+        pass
