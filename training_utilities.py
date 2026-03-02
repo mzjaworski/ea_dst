@@ -36,25 +36,68 @@ def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoad
 # updates network topology according to predefined set of rules
 def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth]) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
-
-    with torch.no_grad():
-        model.compute_reachabilities()
+    noise: float = 0.05
 
     # iterate over all layers
     if pruning_strategies is not None and regrowth_strategies is not None:
-        modules = list([module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)])
+        modules = [module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)]
         reversed_order = bool(numpy.random.randint(0, 2))
+        modules = list(reversed(modules)) if reversed_order else modules
 
-        for layer in (reversed(modules) if reversed_order else modules):
+        layer_param_counts = numpy.array([layer.total_weights() for layer in modules], dtype=int)
+        current_active_counts = numpy.array([int(layer.mask.sum().item()) for layer in modules], dtype=int)
 
-            # apply removal/regrowth only for layers that actually require it
+        layer_factors = numpy.random.uniform(1.0 - noise, 1.0 + noise, size=len(modules))
+        perturbed_float = current_active_counts.astype(float) * layer_factors
+
+        total_target = model.global_weight_target
+        scale = total_target / perturbed_float.sum()
+        perturbed_float *= scale
+
+        new_active_counts = numpy.floor(perturbed_float).astype(int)
+        remainder = perturbed_float - new_active_counts
+        diff = total_target - new_active_counts.sum()
+
+        if diff > 0:
+            order = numpy.argsort(-remainder)
+            for i in order[:diff]:
+                new_active_counts[i] += 1
+        elif diff < 0:
+            order = numpy.argsort(remainder)
+            for i in order[:abs(diff)]:
+                new_active_counts[i] -= 1
+
+        perturbed_densities = new_active_counts / layer_param_counts
+        perturbed_densities = numpy.clip(perturbed_densities, 0.0, 1.0)
+
+        for layer_index, layer in enumerate(modules):
+
             if layer.realized_sparsity() < 1.0:
-                # draw random strategy from the supplied list
+
+                with torch.no_grad():
+                    model.compute_reachabilities()
+
                 pruning_index = numpy.random.randint(0, len(pruning_strategies))
                 regrowth_index = numpy.random.randint(0, len(regrowth_strategies))
 
-                # remove weights
-                pruned_count, pruned_layer = pruning_strategies[pruning_index].apply(layer)
+                pruning_strategy = pruning_strategies[pruning_index]
+                regrow_strategy = regrowth_strategies[regrowth_index]
+
+                current_target = perturbed_densities[layer_index]
+                current_density = 1.0 - layer.realized_sparsity()
+
+                pruned_count, pruned_layer = pruning_strategy.apply(layer)
+                total_weights = layer.total_weights()
+
+                delta_density = current_target - current_density
+                adjusted_prune = int(total_weights * delta_density)
+
+                pruned_count += adjusted_prune
+
+                # sometimes we should have pruned more than we did, lets fix it
+                if pruned_count < 0:
+                    _, pruned_layer = pruning_strategies[pruning_index].apply(layer, prune_count=abs(pruned_count))
+                    pruned_count = 0
 
                 # zero out momentum for inactive weights - this way regrown weights do not inherit parents momentum state
                 param = layer.layer.weight
@@ -68,9 +111,9 @@ def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup
                     buffer[(~layer.mask.bool()).view(-1).nonzero(as_tuple=True)[0]] = 0
                     state['momentum_buffer'] = buffer.view_as(param)
 
-                # regrow weights
-                regrowth_strategies[regrowth_index].apply(pruned_layer, pruned_count)
-                # not assigning back should be safe as we deal with references
+                if pruned_count > 0:
+                    regrow_strategy.apply(pruned_layer, pruned_count)
+                    # not assigning back should be safe as we deal with references
 
     with torch.no_grad():
         model.compute_reachabilities()
@@ -85,7 +128,9 @@ def initialize_statistics() -> Dict:
         "epoch_start": 0,
         "epoch_end": 0,
         "total_time": 0,
-        "total_batches": 0
+        "total_batches": 0,
+        "prediction_diversity": 0,
+        "unique_batches": 0
     }
 
 def reset_tracked_fields(model: torch.nn.Module) -> torch.nn.Module:
@@ -115,6 +160,7 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
     model.lr_decay = lr_decay_factory(model.optimizer)
 
     if parent is not None:
+        model.global_weight_target = parent.global_weight_target
         model.load_state_dict(parent.state_dict(), strict=False)
         model.optimizer.load_state_dict(parent.optimizer.state_dict())
         model.lr_decay.load_state_dict(parent.lr_decay.state_dict())
@@ -156,8 +202,26 @@ def forward_and_backward_with_statistics(models: List[torch.nn.Module], criterio
             model.seen_batches += 1
 
         model.optimizer.step()
-        logits.append(outputs)
+        logits.append(outputs.detach())
+
+    with torch.no_grad():
+        statistics["prediction_diversity"] += compute_diversity(torch.stack(logits, dim=1), targets)
+        statistics["unique_batches"] += 1
+
     return models, statistics
+
+# Theorem 1 - "Diversity and Generalization in Neural Network Ensembles"; cross‑entropy variant - adjusted to work with mixup
+def compute_diversity(logits: torch.Tensor, targets: torch.Tensor) -> float:
+    probabilities = torch.softmax(logits, dim=-1)
+
+    true_class_probabilities = (probabilities * targets[:, None, :]).sum(dim=-1)
+    normalization = true_class_probabilities.max(dim=1, keepdim=True).values
+    p_tilde = true_class_probabilities / (torch.sqrt(torch.tensor(2.0)) * normalization)
+
+    mean = p_tilde.mean(dim=1)
+    var = (p_tilde ** 2).mean(dim=1) - mean ** 2
+
+    return var.mean().cpu().item()
 
 # helper for generating population level statistics
 def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader, device: torch.device) -> dict:
@@ -170,6 +234,7 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "epoch_time": statistics["epoch_end"] - statistics["epoch_start"],
         "total_batches": statistics["total_batches"],
         "amortized_flops": statistics["amortized_flops"] + numpy.sum([(child.amortized_sample_cost * train_loader.batch_size * child.seen_batches) + child.constant_cost for child in children]),
+        "prediction_diversity": statistics["prediction_diversity"] / statistics["unique_batches"],
 
         # best member statistics
         "current_best": children[0].index,

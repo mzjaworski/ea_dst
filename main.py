@@ -71,6 +71,8 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     survivors = children[:parents]
                     children = []
 
+                    print([(1.0 - module.realized_sparsity()) for module in survivors[0].modules() if isinstance(module, src.network.detail.MaskedLayer)])
+
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
                     survivor_index = numpy.random.randint(0, len(survivors))

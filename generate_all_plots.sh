@@ -205,77 +205,85 @@
 #
 
 
+#
+#
+#
+#
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar10_995_loss_uniform.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar10_995_test_acc_uniform.png'
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar100_995_loss_uniform.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar100_995_test_acc_uniform.png'
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/tiny_imagenet_995_loss_uniform.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/tiny_imagenet_995_test_acc_uniform.png'
+#
+#
+#
+#
+#
+#
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar10_995_loss_erk.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar10_995_test_acc_erk.png'
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar100_995_loss_erk.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar100_995_test_acc_erk.png'
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/tiny_imagenet_995_loss_erk.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/tiny_imagenet_995_test_acc_erk.png'
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar10_995_loss_uniform_momentum.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar10_995_test_acc_uniform_momentum.png'
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar100_995_loss_uniform_momentum.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar100_995_test_acc_uniform_momentum.png'
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/tiny_imagenet_995_loss_uniform_momentum.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/tiny_imagenet_995_test_acc_uniform_momentum.png'
+#
+#
+#
+#
+#
+#
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar10_995_loss_erk_momentum.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar10_995_test_acc_erk_momentum.png'
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar100_995_loss_erk_momentum.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar100_995_test_acc_erk_momentum.png'
+#
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/tiny_imagenet_995_loss_erk_momentum.png'
+#python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/tiny_imagenet_995_test_acc_erk_momentum.png'
+#
+#
 
 
 
 
 
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar10_995_loss_uniform.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar10_995_test_acc_uniform.png'
+python ./make_plots.py --groups='{"DST": ["./data/experiment_logs/cifar10/custom/zero/dst/magnitude_uniform/999"], "EA": ["./data/experiment_logs/cifar10/custom/zero/ea/magnitude_uniform/999"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.9%' --save_to='./data/images/cifar10_995_loss.png'
+python ./make_plots.py --groups='{"DST": ["./data/experiment_logs/cifar10/custom/zero/dst/magnitude_uniform/999"], "EA": ["./data/experiment_logs/cifar10/custom/zero/ea/magnitude_uniform/999"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.9%' --save_to='./data/images/cifar10_995_test_acc.png'
 
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar100_995_loss_uniform.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar100_995_test_acc_uniform.png'
+python ./make_plots.py --groups='{"DST": ["./data/experiment_logs/cifar100/custom/zero/dst/magnitude_uniform/999"], "EA": ["./data/experiment_logs/cifar100/custom/zero/ea/magnitude_uniform/999"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.9%' --save_to='./data/images/cifar100_995_loss.png'
+python ./make_plots.py --groups='{"DST": ["./data/experiment_logs/cifar100/custom/zero/dst/magnitude_uniform/999"], "EA": ["./data/experiment_logs/cifar100/custom/zero/ea/magnitude_uniform/999"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.9%' --save_to='./data/images/cifar100_995_test_acc.png'
 
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/tiny_imagenet_995_loss_uniform.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/tiny_imagenet_995_test_acc_uniform.png'
-
-
-
-
-
-
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar10_995_loss_erk.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar10_995_test_acc_erk.png'
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar100_995_loss_erk.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar100_995_test_acc_erk.png'
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/tiny_imagenet_995_loss_erk.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/tiny_imagenet_995_test_acc_erk.png'
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar10_995_loss_uniform_momentum.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar10_995_test_acc_uniform_momentum.png'
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar100_995_loss_uniform_momentum.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar100_995_test_acc_uniform_momentum.png'
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/tiny_imagenet_995_loss_uniform_momentum.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test_momentum/uniform/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/tiny_imagenet_995_test_acc_uniform_momentum.png'
-
-
-
-
-
-
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar10_995_loss_erk_momentum.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar10/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar10_995_test_acc_erk_momentum.png'
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/cifar100_995_loss_erk_momentum.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/cifar100/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/cifar100_995_test_acc_erk_momentum.png'
-
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.5%' --save_to='./data/images/tiny_imagenet_995_loss_erk_momentum.png'
-python ./make_plots.py --groups='{"DFLOW - DUNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/directedflow_directeduniform"], "DMAG - DUNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/directedmagnitude_directeduniform"], "MAG - UNI": ["./data/logs/tiny_imagenet/test_momentum/erk/zero/dst/magnitude_uniform"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.5%' --save_to='./data/images/tiny_imagenet_995_test_acc_erk_momentum.png'
-
-
-
-
-
-
-
+python ./make_plots.py --groups='{"DST": ["./data/experiment_logs/tiny_imagenet/custom/zero/dst/magnitude_uniform/999"], "EA": ["./data/experiment_logs/tiny_imagenet/custom/zero/ea/magnitude_uniform/999"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.9%' --save_to='./data/images/tiny_imagenet_995_loss.png'
+python ./make_plots.py --groups='{"DST": ["./data/experiment_logs/tiny_imagenet/custom/zero/dst/magnitude_uniform/999"], "EA": ["./data/experiment_logs/tiny_imagenet/custom/zero/ea/magnitude_uniform/999"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.9%' --save_to='./data/images/tiny_imagenet_995_test_acc.png'

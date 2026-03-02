@@ -23,6 +23,9 @@ def initialize_masks(network: torch.nn.Module, method: str = 'uniform', sparsity
     else:
         raise RuntimeError(f"unsupported mask initialization: {method}")
 
+    network.global_weight_target = network.active_weights()
+
+
 class MaskedWeight(torch.autograd.Function):
 
     @staticmethod
