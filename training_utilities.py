@@ -304,6 +304,7 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "p_m_median_loss": numpy.mean([numpy.mean(child.median_loss) for child in children]),
         "p_m_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
         "p_m_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
+        "p_cv": numpy.std([numpy.mean(child.mean_loss) for child in children]) / numpy.abs(numpy.mean([numpy.mean(child.mean_loss) for child in children])),
 
         # miscellaneous
         "realized_sparsity": children[0].realized_sparsity(),

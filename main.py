@@ -16,15 +16,9 @@ import argparse
 import random
 import sys
 
-def rank_models(candidates: List[torch.nn.Module], eps: float = 1e-8) -> List[torch.nn.Module]: # ranks using z-score
-    loss = numpy.array([numpy.mean(c.mean_loss) for c in candidates])
-
-    pop_loss = numpy.mean(loss)
-    pop_std = numpy.std(loss)
-
+def rank_models(candidates: List[torch.nn.Module]) -> List[torch.nn.Module]: # ranks using z-score
     for i, c in enumerate(candidates):
-        c.fitness = float((loss[i] - pop_loss) / (pop_std + eps))
-
+        c.fitness = float(numpy.mean(c.mean_loss))
     return candidates
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
