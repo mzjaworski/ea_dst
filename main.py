@@ -35,7 +35,7 @@ def rank_models(candidates: List[torch.nn.Module], alpha: float = 1.0, eps: floa
 
 def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_factory, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader,
                 warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], decay_strategy: src.rules.decay.DecayStrategy,
-                device: torch.device, epochs: int, parents: int, offspring: int, minibatch_budget: int, warmup: int):
+                device: torch.device, epochs: int, parents: int, offspring: int, minibatch_budget: int, warmup: int, redistribute: bool = False, noise: float = 0.05):
     statistics = training_utilities.initialize_statistics()
 
     fitness_function = lambda c: c.rank
@@ -76,7 +76,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 # generate new offspring
                 for child_index in range(1, offspring + 1):
                     survivor_index = numpy.random.randint(0, len(survivors))
-                    child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, survivors[survivor_index], warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device, cycles=1)
+                    child = training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, survivors[survivor_index], warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device, cycles=1, redistribute=redistribute, noise=noise)
                     child.index = child_index
                     children.append(child)
 

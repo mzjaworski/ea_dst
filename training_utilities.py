@@ -33,10 +33,52 @@ def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoad
 
     return {f"acc-top_{k}": 100.0 * correct[k] / total for k in top_k}
 
-# updates network topology according to predefined set of rules
 def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth]) -> torch.nn.Module:
     model = warmup_strategy.apply(model)
-    noise: float = 0.05
+
+    with torch.no_grad():
+        model.compute_reachabilities()
+
+    # iterate over all layers
+    if pruning_strategies is not None and regrowth_strategies is not None:
+        modules = list([module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)])
+        reversed_order = bool(numpy.random.randint(0, 2))
+
+        for layer in (reversed(modules) if reversed_order else modules):
+
+            # apply removal/regrowth only for layers that actually require it
+            if layer.realized_sparsity() < 1.0:
+                # draw random strategy from the supplied list
+                pruning_index = numpy.random.randint(0, len(pruning_strategies))
+                regrowth_index = numpy.random.randint(0, len(regrowth_strategies))
+
+                # remove weights
+                pruned_count, pruned_layer = pruning_strategies[pruning_index].apply(layer)
+
+                # zero out momentum for inactive weights - this way regrown weights do not inherit parents momentum state
+                param = layer.layer.weight
+                if param in model.optimizer.state:
+                    state = model.optimizer.state[param]
+
+                    if state is None or 'momentum_buffer' not in state:
+                        continue
+
+                    buffer = state['momentum_buffer'].view(-1)
+                    buffer[(~layer.mask.bool()).view(-1).nonzero(as_tuple=True)[0]] = 0
+                    state['momentum_buffer'] = buffer.view_as(param)
+
+                # regrow weights
+                regrowth_strategies[regrowth_index].apply(pruned_layer, pruned_count)
+                # not assigning back should be safe as we deal with references
+
+    with torch.no_grad():
+        model.compute_reachabilities()
+
+    return model
+
+# redistributes sparsity across layers, also recomputes reachabilities after adjusting every layer
+def update_mask_redistribute(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], noise: float = 0.05) -> torch.nn.Module:
+    model = warmup_strategy.apply(model)
 
     # iterate over all layers
     if pruning_strategies is not None and regrowth_strategies is not None:
@@ -154,7 +196,7 @@ def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]
     return edge_reachabilities
 
 # instantiates network with all statistics to track
-def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device, cycles: int) -> torch.nn.Module:
+def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device, cycles: int, redistribute: bool = False, noise: float = 0.05) -> torch.nn.Module:
     model = model_factory().to(device)
     model.optimizer = optimizer_factory(model)
     model.lr_decay = lr_decay_factory(model.optimizer)
@@ -168,7 +210,10 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
     model = reset_tracked_fields(model)
 
     for cycle in range(cycles):
-        model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
+        if redistribute:
+            model = update_mask_redistribute(model, warmup_strategy, pruning_strategies, regrowth_strategies, noise)
+        else:
+            model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
 
     model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
 
