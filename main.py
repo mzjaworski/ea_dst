@@ -29,7 +29,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
     fitness_function = lambda c: c.fitness
     criterion = criterion_factory()
 
-    warmup_strategy.update_factor(parents / offspring) # for gradient warmups we need to discount dense backward as its not computed ofr every pop member and just for parents
+    warmup_strategy.update_factor(parents / offspring) # for gradient warmups we need to discount dense backward as it's not computed for every pop member and just for parents
     children = [training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, None, warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device, cycles=warmup) for _ in range(parents)]
     for child_index, child in enumerate(children):
         child.index = child_index

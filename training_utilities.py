@@ -10,8 +10,6 @@ import numpy
 import math
 
 def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoader, device: torch.device, top_k: list[int]) -> dict[str, float]:
-    max_k = max(top_k)
-
     correct = {k: 0 for k in top_k}
     total = 0
 
@@ -21,13 +19,19 @@ def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoad
             targets = targets.to(device)
 
             outputs = model(inputs)
+            num_classes = outputs.size(1)
+
+            max_k = min(max(top_k), num_classes)
             _, preds = outputs.topk(max_k, dim=1)
             preds = preds.t()
 
             matches = preds.eq(targets.view(1, -1))
 
             for k in top_k:
-                correct[k] += matches[:k].any(dim=0).sum().item()
+                if k > num_classes:
+                    correct[k] += 0
+                else:
+                    correct[k] += matches[:k].any(dim=0).sum().item()
 
             total += targets.size(0)
 
