@@ -1,3 +1,5 @@
+#!/bin/bash
+
 conda create --name gt -c conda-forge python=3.12 graph-tool
 conda activate gt
 conda install numpy scipy matplotlib statsmodels imageio tqdm scikit-learn
