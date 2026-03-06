@@ -33,10 +33,12 @@ class MLP(torch.nn.Module, src.network.detail.Graph):
         super().__init__()
         self.fc1 = src.network.detail.MaskedLinear(torch.nn.Linear(num_features, hidden_size))
         self.act1 = torch.nn.GELU()
+        self.norm1 = torch.nn.LayerNorm(hidden_size) # non standard extension
         self.fc2 = src.network.detail.MaskedLinear(torch.nn.Linear(hidden_size, num_features))
 
     def forward(self, x):
         x = self.act1(self.fc1(x))
+        x = self.norm1(x)
         x = self.fc2(x)
         return x
 
