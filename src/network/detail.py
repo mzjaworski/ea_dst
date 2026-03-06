@@ -53,9 +53,8 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
         self.layer = layer
         self.mask = torch.nn.Parameter(torch.ones_like(layer.weight), requires_grad=False)
 
-        # used to compute flow going through node
-        self.register_buffer('_forward_reachability', torch.zeros_like(layer.weight).to_sparse())
-        self.register_buffer('_backward_reachability', torch.zeros_like(layer.weight).to_sparse())
+        self.register_buffer('_forward_reachability', torch.ones_like(layer.weight).to_sparse())
+        self.register_buffer('_backward_reachability', torch.ones_like(layer.weight).to_sparse())
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.layer.weight.data = MaskedWeight.apply(self.layer.weight.data, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
