@@ -29,9 +29,11 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
     fitness_function = lambda c: c.fitness
     criterion = criterion_factory()
 
+    warmup_strategy.update_factor(parents / offspring) # for gradient warmups we need to discount dense backward as its not computed ofr every pop member and just for parents
     children = [training_utilities.spawn_network(model_factory, optimizer_factory, lr_decay_factory, None, warmup_strategy, pruning_strategies, regrowth_strategies, train_loader, minibatch_budget, device, cycles=warmup) for _ in range(parents)]
     for child_index, child in enumerate(children):
         child.index = child_index
+        statistics["amortized_flops"] += warmup * child.constant_cost # count warmup cost
 
     for current_epoch in range(1, epochs + 1):
         survivors = []
@@ -58,6 +60,10 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     statistics["amortized_flops"] += numpy.sum([(child.amortized_sample_cost * train_loader.batch_size * child.seen_batches) + child.constant_cost for child in children])
                     survivors = children[:parents]
                     children = []
+
+                    # run warmup procedure
+                    for survivor in survivors:
+                        warmup_strategy.apply(survivor)
 
                     print([(1.0 - module.realized_sparsity()) for module in survivors[0].modules() if isinstance(module, src.network.detail.MaskedLayer)])
 

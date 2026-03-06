@@ -14,7 +14,11 @@ class Warmup(ABC):
         pass
 
     @abstractmethod
-    def constant_cost(self) -> int:
+    def constant_cost(self) -> float:
+        pass
+
+    @abstractmethod
+    def update_factor(self, factor: float) -> None:
         pass
 
 class NullWarmup(Warmup):
@@ -30,8 +34,11 @@ class NullWarmup(Warmup):
         self.dense_flop_estimate = dense_flop_estimate
         return 3.0 * sparse_flop_estimate # follows Rigging the Lottery: Making All Tickets Winners logic
 
-    def constant_cost(self) -> int:
+    def constant_cost(self) -> float:
         return self._constant_cost * self.dense_flop_estimate
+
+    def update_factor(self, factor: float) -> None:
+        pass
 
 class GradientWarmup(Warmup): # used eg for gradient regrowth
 
@@ -40,6 +47,7 @@ class GradientWarmup(Warmup): # used eg for gradient regrowth
         self.dataset = dataset
         self.minibatch_budget = minibatch_budget
         self._constant_cost = constant_cost
+        self.factor = None
 
     def apply(self, model: torch.nn.Module) -> torch.nn.Module:
         model.train()
@@ -67,7 +75,10 @@ class GradientWarmup(Warmup): # used eg for gradient regrowth
         warmup_samples = self.minibatch_budget * self.dataset.batch_size
         train_samples = minibatch_budget * self.dataset.batch_size
         # follows (adjusted) Rigging the Lottery: Making All Tickets Winners logic
-        return ((3.0 * sparse_flop_estimate * train_samples) + (2.0 * sparse_flop_estimate + dense_flop_estimate) * warmup_samples) / train_samples # we divide by 'train_samples' and not 'train_samples + warmup_samples' as externally we only track 'train_samples' hence we need to slightly inflate cost to account for it
+        return ((3.0 * sparse_flop_estimate * train_samples) + (2.0 * sparse_flop_estimate + dense_flop_estimate) * warmup_samples * self.factor) / train_samples # we divide by 'train_samples' and not 'train_samples + warmup_samples' as externally we only track 'train_samples' hence we need to slightly inflate cost to account for it
 
-    def constant_cost(self) -> int:
+    def constant_cost(self) -> float:
         return self._constant_cost * self.dense_flop_estimate
+
+    def update_factor(self, factor: float) -> None:
+        self.factor = factor

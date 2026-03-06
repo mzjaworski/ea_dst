@@ -33,8 +33,7 @@ def top_k_accuracy(model: torch.nn.Module, testloader: torch.utils.data.DataLoad
 
     return {f"acc-top_{k}": 100.0 * correct[k] / total for k in top_k}
 
-def update_mask(model: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth]) -> torch.nn.Module:
-    model = warmup_strategy.apply(model)
+def update_mask(model: torch.nn.Module, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth]) -> torch.nn.Module:
 
     with torch.no_grad():
         model.compute_reachabilities()
@@ -208,13 +207,22 @@ def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: to
         model.optimizer.load_state_dict(parent.optimizer.state_dict())
         model.lr_decay.load_state_dict(parent.lr_decay.state_dict())
 
+        # copy over parent gradients if any -
+        for p, q in zip(model.parameters(), parent.parameters()):
+            if q.grad is not None:
+                p.grad = q.grad.clone()
+    else:
+        # if no parent given fallback to zero gradients
+        for p in model.parameters():
+            p.grad = torch.zeros_like(p)
+
     model = reset_tracked_fields(model)
 
     for cycle in range(cycles):
         if redistribute:
             model = update_mask_redistribute(model, warmup_strategy, pruning_strategies, regrowth_strategies, noise)
         else:
-            model = update_mask(model, warmup_strategy, pruning_strategies, regrowth_strategies)
+            model = update_mask(model, pruning_strategies, regrowth_strategies)
 
     model.pruned_fraction = sum([pruning_strategy.pruned_fraction() for pruning_strategy in pruning_strategies]) if pruning_strategies is not None else 0.0
 
@@ -279,6 +287,8 @@ def compute_diversity(logits: torch.Tensor, targets: torch.Tensor) -> float:
 
 # helper for generating population level statistics
 def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader, device: torch.device) -> dict:
+    loss = numpy.array([c.mean_loss for c in children])
+    relative_performance = (loss / (numpy.mean(loss, axis=0) + 1e-12)).mean(axis=1)
 
     # create log entry
     log_entry = {
@@ -304,7 +314,11 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "p_m_median_loss": numpy.mean([numpy.mean(child.median_loss) for child in children]),
         "p_m_mean_loss": numpy.mean([numpy.mean(child.mean_loss) for child in children]),
         "p_m_std_loss": numpy.mean([numpy.mean(child.std_loss) for child in children]),
-        "p_cv": numpy.std([numpy.mean(child.mean_loss) for child in children]) / numpy.abs(numpy.mean([numpy.mean(child.mean_loss) for child in children])),
+
+        # relative performance measures
+        "minimum_rp": relative_performance.min(), # rp stands for relative performance
+        "maximum_rp": relative_performance.max(),
+        "spread_rp": relative_performance.max() - relative_performance.min(),
 
         # miscellaneous
         "realized_sparsity": children[0].realized_sparsity(),

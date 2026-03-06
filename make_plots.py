@@ -58,11 +58,17 @@ def simple_moving_average(values: List[float], window_size: int = 17) -> List[fl
     """
     Apply simple moving average smoothing over a list of values.
     """
+    if not values:
+        return []
+
+    reflect = values[1:window_size][::-1]
+    padded = reflect + values
     smoothed = []
-    for i in range(len(values)):
-        start = max(0, i - window_size + 1)
-        window = values[start:i+1]
-        smoothed.append(sum(window) / len(window))
+
+    for i in range(window_size - 1, len(padded)):
+        window = padded[i - window_size + 1:i + 1]
+        smoothed.append(sum(window) / window_size)
+
     return smoothed
 
 def get_files(filepaths: List[str]) -> List[str]:
@@ -95,10 +101,12 @@ if __name__ == "__main__":
     parser.add_argument('--ci', default=True, type=bool, action=argparse.BooleanOptionalAction, help='plot ci or not')
     parser.add_argument('--dpi', default=100, type=int, help='dots per inch (dpi) of the image')
     parser.add_argument('--range', default='null', type=str, help='range of values to plot')
+    parser.add_argument('--average', default='null', type=str, help='range of values to plot')
 
     # parse args
     args = parser.parse_args()
     args.range = json.loads(args.range)
+    args.average = json.loads(args.average)
 
     if not len(args.needles):
         raise RuntimeError("nothing to plot!")
@@ -144,8 +152,14 @@ if __name__ == "__main__":
             
             if not len(matches):
                 raise RuntimeError(f"couldn't match any '{needle}' in the specified directories {group_files}")
-            
+
             mean, lower_bound, upper_bound = average_with_confidence(matches, confidence=0.95)
+
+            if args.average is not None:
+                if needle in args.average:
+                    mean = simple_moving_average(mean, 15)
+                    lower_bound = simple_moving_average(lower_bound, 15)
+                    upper_bound = simple_moving_average(upper_bound, 15)
 
             if args.range is not None:
                 lower, upper = args.range
