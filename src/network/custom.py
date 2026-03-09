@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, List
 import src.utilities
 import src.network.detail
 
@@ -6,33 +6,23 @@ import torch
 import numpy
 
 class SparseANN(src.network.detail.NetworkInterface):
-    def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool, method: str = 'uniform'):
+    def __init__(self, layers: List[Tuple[int, int]] = [(3072, 1024), (1024, 512), (512, 512), (512, 10)], sparsity: float = 0.0, act: str = "relu", layernorm: bool = True, method: str = 'uniform'):
         super().__init__()
-
-        self.in_features = in_features
-        self.num_classes = num_classes
 
         act_f = torch.nn.Tanh if act == "tanh" else torch.nn.ReLU
         norm = torch.nn.LayerNorm if layernorm else torch.nn.Identity
 
-        layers = []
+        self.in_features = layers[0][0]
+        self.num_classes = layers[-1][1]
 
-        # input layer
-        layers.append(src.network.detail.MaskedLinear(torch.nn.Linear(in_features, hidden_dim, bias=False)))
-        layers.append(norm(hidden_dim))
-        layers.append(act_f())
+        network = []
+        for layer_index, (in_dim, out_dim) in enumerate(layers):
+            network.append(src.network.detail.MaskedLinear(torch.nn.Linear(in_dim, out_dim, bias=False)))
+            if layer_index < len(layers) - 1:
+                network.append(norm(out_dim))
+                network.append(act_f())
+        self.model = torch.nn.Sequential(*network)
 
-        # hidden layers
-        for layer_index in range(num_hidden_layers):
-            layers.append(src.network.detail.MaskedLinear(torch.nn.Linear(hidden_dim, hidden_dim, bias=False)))
-            layers.append(norm(hidden_dim))
-            layers.append(act_f())
-
-        # output layer
-        layers.append(src.network.detail.MaskedLinear(torch.nn.Linear(hidden_dim, num_classes)))
-        layers.append(torch.nn.Identity())
-
-        self.model = torch.nn.Sequential(*layers)
         src.network.detail.initialize_masks(self, method=method, sparsity=sparsity)
 
     def forward(self, x) -> torch.Tensor:
@@ -53,34 +43,35 @@ class SparseANN(src.network.detail.NetworkInterface):
 
 
 class DenseANNFromSparseANN(src.network.detail.NetworkInterface):
-    def __init__(self, in_features: int, hidden_dim: int, num_hidden_layers: int, num_classes: int, sparsity: float, act: str, layernorm: bool):
+    def __init__(self, layers: List[Tuple[int, int]] = [(3072, 1024), (1024, 512), (512, 512), (512, 10)], sparsity: float = 0.0, act: str = "relu", layernorm: bool = True, method: str = 'uniform'):
         super().__init__()
 
+        self.in_features = layers[0][0]
+        self.num_classes = layers[-1][1]
+
         network_depth = 3
-        weight_target = SparseANN(in_features=in_features, hidden_dim=hidden_dim, num_hidden_layers=num_hidden_layers, num_classes=num_classes, sparsity=sparsity, act=act, layernorm=layernorm).active_weights()
-        neuron_count = src.utilities.estimate_neuron_count(features=in_features, classes=num_classes, network_depth=network_depth, parameter_target=weight_target)
+        weight_target = SparseANN(layers=layers, sparsity=sparsity, act=act, layernorm=layernorm, method=method).active_weights()
+        neuron_count = src.utilities.estimate_neuron_count(features=self.in_features, classes=self.num_classes, network_depth=network_depth, parameter_target=weight_target)
 
         act_f = torch.nn.Tanh if act == "tanh" else torch.nn.ReLU
         norm = torch.nn.LayerNorm if layernorm else torch.nn.Identity
 
-        layers = []
+        network = []
 
-        # input layer
-        layers.append(src.network.detail.MaskedLinear(torch.nn.Linear(in_features, neuron_count, bias=False)))
-        layers.append(norm(neuron_count))
-        layers.append(act_f())
+        network.append(src.network.detail.MaskedLinear(torch.nn.Linear(self.in_features, neuron_count, bias=False)))
+        network.append(norm(neuron_count))
+        network.append(act_f())
 
-        # hidden layers
         for _ in range(network_depth - 2):
-            layers.append(src.network.detail.MaskedLinear(torch.nn.Linear(neuron_count, neuron_count, bias=False)))
-            layers.append(norm(neuron_count))
-            layers.append(act_f())
+            network.append(src.network.detail.MaskedLinear(torch.nn.Linear(neuron_count, neuron_count, bias=False)))
+            network.append(norm(neuron_count))
+            network.append(act_f())
 
-        # output layer
-        layers.append(src.network.detail.MaskedLinear(torch.nn.Linear(neuron_count, num_classes)))
-        layers.append(torch.nn.Identity())
+        network.append(src.network.detail.MaskedLinear(torch.nn.Linear(neuron_count, self.num_classes)))
+        network.append(torch.nn.Identity())
 
-        self.model = torch.nn.Sequential(*layers)
+        self.model = torch.nn.Sequential(*network)
+        self.global_weight_target = self.active_weights()
 
     def forward(self, x) -> torch.Tensor:
         return self.model(torch.flatten(x, start_dim=1))

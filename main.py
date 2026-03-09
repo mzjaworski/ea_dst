@@ -56,7 +56,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                 if len(children):
                     children = rank_models(children)
                     children.sort(key=fitness_function)
-                    # print([(child.index, fitness_function(child)) for child in children])
+                    print([(child.index, fitness_function(child)) for child in children])
 
                     statistics["amortized_flops"] += numpy.sum([(child.amortized_sample_cost * train_loader.batch_size * child.seen_batches) + child.constant_cost for child in children])
                     survivors = children[:parents]
