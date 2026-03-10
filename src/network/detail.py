@@ -1,10 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Tuple, List
+from typing import Tuple, List, Union
 import torch
 import src.network.mask_initialization
 
-def initialize_masks(network: torch.nn.Module, method: str = 'uniform', sparsity: float = 1.0) -> None:
-    assert 0.0 <= sparsity < 1.0, "sparsity must be in [0, 1.0)"
+def initialize_masks(network: torch.nn.Module, method: str = 'uniform', sparsity: Union[List[float], float] = 1.0) -> None:
+    if isinstance(sparsity, float):
+        assert 0.0 <= sparsity < 1.0, "sparsity must be in [0, 1.0)"
+    else:
+        for target in sparsity:
+            assert 0.0 <= target < 1.0, "sparsity must be in [0, 1.0)"
 
     layers = []
 
@@ -12,16 +16,39 @@ def initialize_masks(network: torch.nn.Module, method: str = 'uniform', sparsity
         if isinstance(module, MaskedLayer):
             layers.append(module)
 
-    if method == 'uniform':
-        for layer in layers:
-            layer.mask.copy_(src.network.mask_initialization.uniform(layer.mask, sparsity))
-    elif method == 'erk':
-        is_dense, epsilon = src.network.mask_initialization.compute_erk_initialization([layer.nout_nin_kh_kw() for layer in layers], sparsity)
-        for dense, layer in zip(is_dense, layers):
-            if not dense:
-                layer.mask.copy_(src.network.mask_initialization.erk(layer.mask, layer.nout_nin_kh_kw(), epsilon))
-    else:
-        raise RuntimeError(f"unsupported mask initialization: {method}")
+    match method:
+        case 'bernoulli':
+            if isinstance(sparsity, float):
+                sparsities = [sparsity for _ in range(len(layers))]
+            else:
+                sparsities = sparsity
+
+            if not len(sparsities) == len(layers):
+                raise RuntimeError(f"if sparsity is a list, it's length must match number of layers!")
+
+            for layer, sparsity in zip(layers, sparsities):
+                layer.mask.copy_(src.network.mask_initialization.bernoulli(layer.mask, sparsity))
+        case 'uniform':
+            if isinstance(sparsity, float):
+                sparsities = [sparsity for _ in range(len(layers))]
+            else:
+                sparsities = sparsity
+
+            if not len(sparsities) == len(layers):
+                raise RuntimeError(f"if sparsity is a list, it's length must match number of layers!")
+
+            for layer, sparsity in zip(layers, sparsities):
+                layer.mask.copy_(src.network.mask_initialization.uniform(layer.mask, sparsity))
+        case 'erk':
+            if not isinstance(sparsity, float):
+                raise RuntimeError("erk requires float sparsity target!")
+
+            is_dense, epsilon = src.network.mask_initialization.compute_erk_initialization([layer.nout_nin_kh_kw() for layer in layers], sparsity)
+            for dense, layer in zip(is_dense, layers):
+                if not dense:
+                    layer.mask.copy_(src.network.mask_initialization.erk(layer.mask, layer.nout_nin_kh_kw(), epsilon))
+        case _:
+            raise RuntimeError(f"unsupported mask initialization: {method}")
 
     network.global_weight_target = network.active_weights()
 

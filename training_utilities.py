@@ -192,9 +192,9 @@ def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]
     edge_reachabilities = []
 
     for module in modules:
-        forward_reachability = torch.sum(module.forward_reachability * module.mask != 0).item() / module.active_weights()
-        backward_reachability = torch.sum(module.backward_reachability * module.mask != 0).item() / module.active_weights()
-        functional_reachability = torch.sum((module.forward_reachability.to(torch.bool) & module.backward_reachability.to(torch.bool)) * module.mask != 0).item() / module.active_weights()
+        forward_reachability = torch.sum(module.forward_reachability * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
+        backward_reachability = torch.sum(module.backward_reachability * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
+        functional_reachability = torch.sum((module.forward_reachability.to(torch.bool) & module.backward_reachability.to(torch.bool)) * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
         edge_reachabilities.append((forward_reachability, backward_reachability, functional_reachability))
 
     return edge_reachabilities

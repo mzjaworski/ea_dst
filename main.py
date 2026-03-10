@@ -66,7 +66,7 @@ def train_epoch(model_factory, optimizer_factory, lr_decay_factory, criterion_fa
                     for survivor in survivors:
                         warmup_strategy.apply(survivor)
 
-                    print([(1.0 - module.realized_sparsity()) for module in survivors[0].modules() if isinstance(module, src.network.detail.MaskedLayer)])
+                    print([training_utilities.edge_reachability(module) for module in survivors[0].modules() if isinstance(module, src.network.detail.MaskedLayer)])
 
                 # generate new offspring
                 for child_index in range(1, offspring + 1):

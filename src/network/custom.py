@@ -1,4 +1,4 @@
-from typing import Tuple, List
+from typing import Tuple, List, Union
 import src.utilities
 import src.network.detail
 
@@ -6,7 +6,7 @@ import torch
 import numpy
 
 class SparseANN(src.network.detail.NetworkInterface):
-    def __init__(self, layers: List[Tuple[int, int]] = [(3072, 1024), (1024, 512), (512, 512), (512, 10)], sparsity: float = 0.0, act: str = "relu", layernorm: bool = True, method: str = 'uniform'):
+    def __init__(self, layers: List[Tuple[int, int]] = [(3072, 1024), (1024, 512), (512, 512), (512, 10)], sparsity: Union[List[float], float] = 0.0, act: str = "relu", layernorm: bool = True, method: str = 'uniform'):
         super().__init__()
 
         act_f = torch.nn.Tanh if act == "tanh" else torch.nn.ReLU
@@ -43,7 +43,7 @@ class SparseANN(src.network.detail.NetworkInterface):
 
 
 class DenseANNFromSparseANN(src.network.detail.NetworkInterface):
-    def __init__(self, layers: List[Tuple[int, int]] = [(3072, 1024), (1024, 512), (512, 512), (512, 10)], sparsity: float = 0.0, act: str = "relu", layernorm: bool = True, method: str = 'uniform'):
+    def __init__(self, layers: List[Tuple[int, int]] = [(3072, 1024), (1024, 512), (512, 512), (512, 10)], sparsity: Union[List[float], float] = 0.0, act: str = "relu", layernorm: bool = True, method: str = 'uniform'):
         super().__init__()
 
         self.in_features = layers[0][0]
