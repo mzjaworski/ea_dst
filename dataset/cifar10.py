@@ -5,13 +5,15 @@ import torchvision
 import torch
 import utilities
 
+from torch.utils.data import default_collate
+import torchvision.transforms.v2
+
 class CIFAR10(dataset.i_dataset.IDataset):
 
-    def __init__(self, train_batch: int, test_batch: int, resize: Tuple[float, float], flatten: bool, device: torch.device = torch.device("cpu")):
+    def __init__(self, train_batch: int, test_batch: int, resize: Tuple[float, float], device: torch.device = torch.device("cpu")):
         self.train_batch = train_batch
         self.test_batch = test_batch
         self.resize = resize
-        self.flatten = flatten
         self.device = device
 
     def load(self) -> (torch.utils.data.DataLoader, torch.utils.data.DataLoader):
@@ -21,20 +23,26 @@ class CIFAR10(dataset.i_dataset.IDataset):
             torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),
-            torchvision.transforms.Lambda(lambda x: torch.flatten(x)) if self.flatten else torchvision.transforms.Lambda(lambda x: x)  # needed for CNNs
+            torchvision.transforms.RandomErasing(p=0.25)
         ])
 
         test_transform = torchvision.transforms.Compose([
             torchvision.transforms.Resize(self.resize),
             torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),
-            torchvision.transforms.Lambda(lambda x: torch.flatten(x)) if self.flatten else torchvision.transforms.Lambda(lambda x: x) # needed for CNNs
+            torchvision.transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))
         ])
+
+        cutmix = torchvision.transforms.v2.CutMix(num_classes=10, alpha=0.5)
+        mixup = torchvision.transforms.v2.MixUp(num_classes=10, alpha=0.5)
+        cutmix_or_mixup = torchvision.transforms.v2.RandomChoice([cutmix, mixup])
+
+        def collate_fn(batch):
+            return cutmix_or_mixup(*default_collate(batch))
 
         trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=train_transform)
         testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=test_transform)
 
-        train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.train_batch, shuffle=True, num_workers=6, pin_memory=False, drop_last=True)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.train_batch, shuffle=True, num_workers=6, pin_memory=False, drop_last=True, collate_fn=collate_fn)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=self.test_batch, shuffle=False, num_workers=6, pin_memory=False, drop_last=True)
 
         return train_loader, test_loader

@@ -102,8 +102,6 @@ class BetaDecayStrategy(DecayStrategy):
         factor = (self.target / (p_hat + 1e-8)) ** self.gamma
         adjusted = value * factor
 
-        print(self.target, p_hat, factor, adjusted)
-
         if adjusted < self.low:
             adjusted = self.low
         if adjusted > self.high:

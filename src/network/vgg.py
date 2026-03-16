@@ -20,7 +20,7 @@ class VGG(src.network.detail.NetworkInterface):
     def __init__(self, vgg_name: str, num_classes: int, sparsity: float, method: str = 'uniform'):
         super(VGG, self).__init__()
         self.features = self._make_layers(cfg[vgg_name])
-        self.classifier = src.network.detail.MaskedLayer(torch.nn.Linear(512, num_classes))
+        self.classifier = src.network.detail.MaskedLinear(torch.nn.Linear(512, num_classes))
         src.network.detail.initialize_masks(self, method=method, sparsity=sparsity)
 
     def _make_layers(self, cfg: List[Union[str, int]]) -> torch.nn.Sequential:
@@ -30,9 +30,9 @@ class VGG(src.network.detail.NetworkInterface):
             if x == 'M':
                 layers += [torch.nn.MaxPool2d(kernel_size=2, stride=2)]
             else:
-                layers += [src.network.detail.MaskedLayer(torch.nn.Conv2d(in_channels, x, kernel_size=3, padding=1)),
+                layers += [src.network.detail.MaskedConv2D(torch.nn.Conv2d(in_channels, x, kernel_size=3, padding=1)),
                            torch.nn.BatchNorm2d(x),
-                           src.network.detail.ActivationFunctionWrapper(torch.nn.ReLU(inplace=True))]
+                           torch.nn.ReLU(inplace=True)]
                 in_channels = x
         layers += [torch.nn.AvgPool2d(kernel_size=1, stride=1)]
         return torch.nn.Sequential(*layers)
@@ -42,6 +42,9 @@ class VGG(src.network.detail.NetworkInterface):
         out = out.view(out.size(0), -1)
         out = self.classifier(out)
         return out
+
+    def compute_reachabilities(self) -> None:
+        pass # TODO
 
 def vgg11(**kwargs) -> src.network.detail.NetworkInterface:
     return VGG(vgg_name='VGG11', **kwargs)

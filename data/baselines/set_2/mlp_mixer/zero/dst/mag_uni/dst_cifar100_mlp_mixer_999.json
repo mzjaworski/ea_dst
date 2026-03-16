@@ -1,0 +1,14 @@
+{
+  "log": "./data/logs/cifar100/mlp_mixer/zero/dst/mag_uni/999/LOG_IDENTIFIER",
+  "model": {"type": "src.network.mlp_mixer.MLPMixer", "kwargs": {"image_size": 32, "patch_size": 4, "num_layers": 10, "num_features": 512, "token_hidden": 512, "mixer_hidden": 2048, "num_classes": 100, "sparsity": 0.999, "method": "erk"}},
+  "dataset": {"type": "dataset.cifar100.CIFAR100", "kwargs": {"train_batch": 128, "test_batch": 512, "resize": [32, 32], "device": "DEVICE_LOCATION"}},
+  "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.007, "momentum": 0.9, "weight_decay": 0.0001}},
+  "lr_decay": {"type": "torch.optim.lr_scheduler.MultiStepLR", "kwargs": {"milestones": [125, 187], "gamma": 0.5}},
+  "criterion": {"type": "torch.nn.CrossEntropyLoss", "kwargs": {"reduction": "none"}},
+  "warmup": {"type": "src.rules.warmup.NullWarmup", "kwargs": {"constant_cost": 0.0}},
+  "pruning": {"type": "src.rules.pruning.MagnitudePruning", "kwargs": {"pruned_fraction": 0.25, "decay_rate": null}},
+  "regrowth": {"type": "src.rules.regrowth.UniformRegrowth", "kwargs": {"weight_reinitialization": "zero"}},
+  "decay": {"type": "src.rules.decay.NullDecay", "kwargs": {}},
+  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 250, "parents": 1, "offspring": 1, "minibatch_budget": 1500, "warmup": 5}},
+  "serialize": {"type": "src.serialize.FileSystemSerialization", "kwargs": {"path": "./data/models/cifar100/mlp_mixer/zero/dst/mag_uni/999/LOG_IDENTIFIER"}}
+}

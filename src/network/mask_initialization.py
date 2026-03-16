@@ -2,6 +2,10 @@ from typing import List, Tuple
 import torch
 import numpy
 
+def bernoulli(weights: torch.Tensor, sparsity: float) -> torch.Tensor:
+    p = 1 - sparsity
+    return torch.bernoulli(torch.full_like(weights, p))
+
 def uniform(weights: torch.Tensor, sparsity: float) -> torch.Tensor:
     mask = torch.zeros_like(weights)
     k = int((1 - sparsity) * mask.numel())
