@@ -46,8 +46,8 @@ if __name__ == "__main__":
     parser.add_argument('--devices', default='["cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5", "cuda:6", "cuda:7"]', type=json.loads, help="devices on which we will run in parallel processing")
     parser.add_argument('--device_needle', default="DEVICE_LOCATION", type=str, help='string that will be replaced with passed device')
     parser.add_argument('--log_needle', default="LOG_IDENTIFIER", type=str, help='string that will be replaced with run ID')
-    parser.add_argument('--runs', default=10, type=int, help='number of parallel experiments to run')
-    parser.add_argument('--workers', default=4 * 7, type=int, help='number of parallel workers')
+    parser.add_argument('--runs', default=5, type=int, help='number of parallel experiments to run')
+    parser.add_argument('--workers', default=1 * 7, type=int, help='number of parallel workers')
     parser.add_argument('--seed', default=secrets.randbits(32), type=int, help='training seed (for reproducibility)')
 
     # parse args
