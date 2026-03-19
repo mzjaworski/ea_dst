@@ -1,5 +1,5 @@
 {
-  "log": "./data/logs/cifar10/custom/erk/mag_uni/20/99/LOG_IDENTIFIER",
+  "log": "./data/logs/cifar10/custom/uniform/mag_uni/20/99/LOG_IDENTIFIER",
   "model": {"type": "src.network.custom.SparseANN", "kwargs": {"layers": [[3072, 1024], [1024, 512], [512, 512], [512, 10]], "sparsity": 0.99, "act": "relu", "layernorm": true, "method": "uniform"}},
   "dataset": {"type": "dataset.cifar10.CIFAR10", "kwargs": {"train_batch": 128, "test_batch": 512, "resize": [32, 32], "device": "DEVICE_LOCATION"}},
   "optimizer": {"type": "torch.optim.SGD", "kwargs": {"lr": 0.01, "momentum": 0.0, "weight_decay": 0.0005}},

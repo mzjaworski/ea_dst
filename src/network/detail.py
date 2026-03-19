@@ -80,8 +80,8 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
         self.layer = layer
         self.mask = torch.nn.Parameter(torch.ones_like(layer.weight), requires_grad=False)
 
-        self.register_buffer('_forward_reachability', torch.ones_like(layer.weight).to_sparse())
-        self.register_buffer('_backward_reachability', torch.ones_like(layer.weight).to_sparse())
+        self.register_buffer('_forward_reachability', torch.ones_like(layer.weight))
+        self.register_buffer('_backward_reachability', torch.ones_like(layer.weight))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.layer.weight.data = MaskedWeight.apply(self.layer.weight.data, self.mask) # otherwise backward pass does not propagate gradients for zeroed weights
@@ -106,11 +106,11 @@ class MaskedLayer(torch.nn.Module, Graph, ABC):
 
     @property
     def forward_reachability(self) -> torch.Tensor:
-        return self._forward_reachability.clone().to(torch.bool).to_dense()
+        return self._forward_reachability.clone().to(torch.bool)
 
     @property
     def backward_reachability(self) -> torch.Tensor:
-        return self._backward_reachability.clone().to(torch.bool).to_dense()
+        return self._backward_reachability.clone().to(torch.bool)
 
 class MaskedLinear(MaskedLayer):
 
@@ -141,7 +141,7 @@ class MaskedLinear(MaskedLayer):
             out_reach = (self.mask.to(torch.bool) & sample.unsqueeze(0)).any(dim=1)
             outputs.append(out_reach)
 
-        self._forward_reachability.copy_((torch.ones_like(outputs[-1]).unsqueeze(1) & x.any(dim=0).unsqueeze(0)).bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
+        self._forward_reachability.copy_((torch.ones_like(outputs[-1]).unsqueeze(1) & x.any(dim=0).unsqueeze(0)).bool()) # we store this purely for logging; everything can be accumulated to one matrix
         output_reachability = torch.stack(outputs, dim=0).reshape(*original_shape[:-1], out_features)
 
         return output_reachability
@@ -158,7 +158,7 @@ class MaskedLinear(MaskedLayer):
             in_reach = (self.mask.to(torch.bool) & sample.unsqueeze(1)).any(dim=0)
             inputs.append(in_reach)
 
-        self._backward_reachability.copy_((x.any(dim=0).unsqueeze(1) & torch.ones_like(inputs[-1]).unsqueeze(0)).bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
+        self._backward_reachability.copy_((x.any(dim=0).unsqueeze(1) & torch.ones_like(inputs[-1]).unsqueeze(0)).bool()) # we store this purely for logging; everything can be accumulated to one matrix
         input_reachability = torch.stack(inputs, dim=0).reshape(*original_shape[:-1], in_features)
 
         return input_reachability
@@ -198,7 +198,7 @@ class MaskedConv2D(MaskedLayer):
         H_out = (H_in + 2 * self.layer.padding[0] - self.layer.dilation[0] * (self.layer.kernel_size[0] - 1) - 1) // self.layer.stride[0] + 1
         W_out = (W_in + 2 * self.layer.padding[1] - self.layer.dilation[1] * (self.layer.kernel_size[1] - 1) - 1) // self.layer.stride[1] + 1
 
-        self._forward_reachability.copy_(self.mask.clone().bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
+        self._forward_reachability.copy_(self.mask.clone().bool()) # we store this purely for logging; everything can be accumulated to one matrix
         output_reachability = torch.ones((self.layer.out_channels, H_out, W_out), dtype=torch.bool, device=input_connectivity.device)
 
         return output_reachability
@@ -210,7 +210,7 @@ class MaskedConv2D(MaskedLayer):
         H_in = (H_out - 1) * self.layer.stride[0] - 2 * self.layer.padding[0] + self.layer.dilation[0] * (kernel_h - 1) + 1
         W_in = (W_out - 1) * self.layer.stride[1] - 2 * self.layer.padding[1] + self.layer.dilation[1] * (kernel_w - 1) + 1
 
-        self._backward_reachability.copy_(self.mask.clone().bool().to_sparse()) # we store this purely for logging; everything can be accumulated to one matrix
+        self._backward_reachability.copy_(self.mask.clone().bool()) # we store this purely for logging; everything can be accumulated to one matrix
         input_reachability = torch.ones((in_channels, H_in, W_in), dtype=torch.bool, device=output_connectivity.device)
 
         return input_reachability
