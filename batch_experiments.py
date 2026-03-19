@@ -12,6 +12,8 @@ import time
 import subprocess
 import secrets
 import numpy
+import pathlib
+import signal
 
 class GlobalStorage(metaclass=settings.SingletonMeta): # not a good design choice but it will do
     def __init__(self):
@@ -19,6 +21,10 @@ class GlobalStorage(metaclass=settings.SingletonMeta): # not a good design choic
 
 thread_local = threading.local()
 thread_id_lock = threading.Lock()
+
+processes = set()
+process_lock = threading.Lock()
+can_add = True
 
 def replace_all(haystack: str, needle: str, replacement: str) -> str:
     return re.sub(needle, replacement, haystack)
@@ -29,15 +35,30 @@ def thread_id():
             thread_local.thread_id = next(GlobalStorage().thread_id)
     return thread_local.thread_id
 
-def run_experiment(command: str, devices: List[str], needle: str) -> None:
+def run_experiment(command: str, devices: list, needle: str) -> None:
+    global can_add
+
     id = thread_id() % len(devices)
-    
+    command = replace_all(command, needle, devices[id])
+    print(f"running: {command}")
+
+    proc = None
+    with process_lock:
+        if can_add:
+            proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, preexec_fn=os.setsid)
+            processes.add(proc)
+        else:
+            return
+
     try:
-        command = replace_all(command, needle, devices[id])
-        print(f"running: {command}")
-        subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
-    except Exception as e:
-        print(f"command: {command}\n failed with error: {e}")
+        stdout, stderr = proc.communicate()
+        if proc.returncode != 0:
+            message = f"command: {command}\n exit code: {proc.returncode}\n stderr: {stderr}"
+            print(message)
+            raise RuntimeError(message)
+    finally:
+        with process_lock:
+            processes.discard(proc)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='main', description='main program used to launch experiments')
@@ -80,11 +101,15 @@ if __name__ == "__main__":
 
     # generate log locations
     commands = []
+    logs = []
+
     for configuration in args.configuration:
         for run_index in range(args.runs):
             command = copy.deepcopy(configuration)
             directory, filename = os.path.split(command['log'])
-            command['log'] = os.path.join(directory, replace_all(filename, args.log_needle, file_names[run_index])) # a bit excessive
+
+            logs.append(os.path.join(directory, replace_all(filename, args.log_needle, file_names[run_index])))
+            command['log'] = logs[-1] # a bit excessive
             
             if "serialize" in command:
                 if "kwargs" in command['serialize']:
@@ -101,7 +126,35 @@ if __name__ == "__main__":
         for command in commands:
             futures.append(executor.submit(run_experiment, command, args.devices, args.device_needle))
 
-        for future in as_completed(futures):
-            error = future.result()
+        try:
+            for future in as_completed(futures):
+                future.result()
 
-    print("done")
+            print("done")
+        except Exception as e:
+
+            # abort future tasks
+            for f in futures:
+                f.cancel()
+
+            # abort running tasks
+            with process_lock:
+                can_add = False
+                for process in processes:
+                    try:
+                        print(f"killing pid: {process.pid}")
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    except Exception:
+                        pass
+
+            executor.shutdown(wait=True, cancel_futures=True)
+
+            for log in logs:
+                try:
+                    print(f"removing: {log}")
+                    pathlib.Path(log).unlink()
+                except FileNotFoundError as e:
+                    print(f"error while removing: {e}")
+                    pass
+
+            print(f"aborted run")
