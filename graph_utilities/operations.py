@@ -1,11 +1,15 @@
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Dict
+import matplotlib.pyplot as plt
 from graph_tool.all import *
 import numpy
 import torch
 
 import src.network.detail
 
-def convert_to_graph(model: torch.nn.Module) -> Tuple[graph_tool.Graph, List[int]]:
+# converts feed forward network to a graph
+def convert_to_graph(model: src.network.detail.NetworkInterface) -> Tuple[graph_tool.Graph, List[int]]:
+    # ensure reachability matrices are populated inside of MaskedLayer
+    model.compute_reachabilities()
 
     # collect only custom layers
     layers = []
@@ -21,6 +25,7 @@ def convert_to_graph(model: torch.nn.Module) -> Tuple[graph_tool.Graph, List[int
 
     # create graph
     graph = graph_tool.Graph(directed=True)
+    connectivity = graph.new_edge_property("string")
     vertices = []
 
     # create vertices for input layer
@@ -32,156 +37,54 @@ def convert_to_graph(model: torch.nn.Module) -> Tuple[graph_tool.Graph, List[int
         layer_vertices = [graph.add_vertex() for _ in range(layer.mask.shape[0])]
         vertices.append(layer_vertices)
 
+    # reachability modes; n = none, f = forward, b = backward, fb = forward+backward
+    reachability_map = {0: "n", 1: "f", 2: "b", 3: "fb"}
+
     # add edges according to each layers mask
     for layer_index, layer in enumerate(layers):
-        mask = layer.mask.tolist() # indexing native type is orders of magnitude faster
+
+        # indexing native type is orders of magnitude faster
+        forward = layer.forward_reachability.tolist()
+        backward = layer.backward_reachability.tolist()
+        mask = layer.mask.tolist()
+
         out_dim, in_dim = layer.mask.shape
 
         for i in range(out_dim):
             for j in range(in_dim):
                 if mask[i][j]:
-                    graph.add_edge(vertices[layer_index][j], vertices[layer_index + 1][i])
+                    edge = graph.add_edge(vertices[layer_index][j], vertices[layer_index + 1][i])
+                    connectivity[edge] = reachability_map[(int(forward[i][j]) * 1) + (int(backward[i][j]) * 2)]
+
+    graph.edge_properties["connectivity"] = connectivity
 
     return graph, [len(layer) for layer in vertices]
 
-def reachable_from(graph: Graph, source: int) -> numpy.ndarray:
-    class ReachabilityVisitor(BFSVisitor):
-        def __init__(self, reached: numpy.ndarray):
-            self.reached = reached
+# llm assisted
+def layered_graph_figure(model: src.network.detail.NetworkInterface, filename: str, width: int = 8000, height: int = 6000, margin: float = 100.0, vertex_size: float = 12, edge_pen_width: float = 1.0, colors: Dict[str, Tuple[float, float, float, float]] = None):
+    from graph_tool.all import Graph, graph_draw
+    graph, neuron_counts = convert_to_graph(model)
 
-        def discover_vertex(self, u):
-            self.reached[int(u)] = True
-
-    visitor = ReachabilityVisitor(numpy.zeros(graph.num_vertices(), dtype=bool))
-    bfs_search(graph, graph.vertex(source), visitor)
-
-    return visitor.reached
-
-def reachable_from_input(graph: Graph, neuron_counts: list[int]) -> numpy.ndarray:
-    g = graph.copy()
-
-    phantom = g.add_vertex()
-    n_inputs = neuron_counts[0]
-
-    for v in range(n_inputs):
-        g.add_edge(phantom, g.vertex(v))
-
-    reached = reachable_from(g, int(phantom))
-
-    return reached[:-1]
-
-def reachable_from_output(graph: Graph, neuron_counts: list[int]) -> numpy.ndarray:
-    g = graph.copy()
-    g.set_reversed(True)
-
-    phantom = g.add_vertex()
-    offset = sum(neuron_counts[:-1])
-
-    for v in range(neuron_counts[-1]):
-        g.add_edge(phantom, g.vertex(offset + v))
-
-    reached = reachable_from(g, int(phantom))
-
-    return reached[:-1]
-
-def functional_core(graph: Graph, neuron_counts: list[int]) -> numpy.ndarray:
-    return reachable_from_input(graph, neuron_counts) & reachable_from_output(graph, neuron_counts)
-
-def extract_from_mask(graph: Graph, neuron_counts: list[int], mask: numpy.ndarray) -> Tuple[Graph, List[int]]:
-    core_graph = Graph(directed=graph.is_directed())
-    core_neuron_counts = []
-
-    # propagate vertices
-    vertex_map = {}
-    for v in graph.vertices():
-        idx = int(v)
-        if mask[idx]:
-            vertex_map[idx] = int(core_graph.add_vertex())
-
-    # propagate edges
-    for e in graph.edges():
-        u = int(e.source())
-        v = int(e.target())
-        if mask[u] and mask[v]:
-            core_graph.add_edge(core_graph.vertex(vertex_map[u]), core_graph.vertex(vertex_map[v]))
-
-    # update number of neuron_counts
-    start = 0
-    for layer_size in neuron_counts:
-        core_neuron_counts.append(int(numpy.sum(mask[start : start + layer_size])))
-        start += layer_size
-
-    return core_graph, core_neuron_counts
-
-def extract_functional_core(graph: Graph, neuron_counts: list[int]) -> Tuple[Graph, List[int]]:
-    return extract_from_mask(graph, neuron_counts, functional_core(graph, neuron_counts))
-
-def extract_input_reachable(graph: Graph, neuron_counts: list[int]) -> Tuple[Graph, List[int]]:
-    return extract_from_mask(graph, neuron_counts, reachable_from_input(graph, neuron_counts))
-
-def extract_output_reachable(graph: Graph, neuron_counts: list[int]) -> Tuple[Graph, List[int]]:
-    return extract_from_mask(graph, neuron_counts, reachable_from_output(graph, neuron_counts))
-
-def per_layer(neuron_counts: list[int], data: numpy.ndarray, metric = numpy.sum) -> List[Any]:
-    results = []
-
-    start = 0
-    for neuron_count in neuron_counts:
-        results.append(metric(data[start : start + neuron_count]))
-        start += neuron_count
-
-    return results
-
-def interlayer_connectivity(neuron_counts: list[int], forward_mask: numpy.ndarray, backward_mask: numpy.ndarray, operand = numpy.outer) -> List[numpy.ndarray]:
-    assert len(forward_mask) == len(backward_mask)
-    assert sum(neuron_counts) == len(forward_mask)
-
-    result = []
-
-    # first gather all matrices
-    forward_layers = []
-    backward_layers = []
-
-    start = 0
-    for layer_neuron_count in neuron_counts:
-        forward_layers.append(forward_mask[start : start + layer_neuron_count])
-        backward_layers.append(backward_mask[start : start + layer_neuron_count])
-        start += layer_neuron_count
-
-    # now assemble reachability matrices per each layer
-    for layer_index in range(len(forward_layers) - 1):
-        result.append(operand(forward_layers[layer_index + 1], backward_layers[layer_index]))
-
-    return result
-
-def edge_reachability(model: torch.nn.Module, edge_connectivity: List[numpy.ndarray]) -> List[int]:
-
-    # collect only custom layers
-    layers = []
-    for layer in model.modules():
-        if not isinstance(layer, src.network.detail.MaskedLayer):
-            continue
-        if not isinstance(layer.layer, torch.nn.Linear):
-            raise RuntimeError("currently only linear layers are supported!")
-        layers.append(layer)
-
-    assert len(edge_connectivity) == len(layers)
-
-    # compute overlap between supplied theoretical edge connectivity and actual network
-    edge_overlap = []
-    for (layer, connectivity_matrix) in zip(layers, edge_connectivity):
-        mask = layer.mask.cpu().numpy()
-        edge_overlap.append(float(numpy.sum(mask.astype(bool) & connectivity_matrix.astype(bool)).astype(float) / numpy.sum(mask)))
-
-    return edge_overlap
-
-# llm generated
-def draw_layered_graph(graph: Graph, neuron_counts: list[int], filename: str, width: int = 8000, height: int = 6000, margin: float = 100.0, vertex_size: float = 12, edge_pen_width: float = 1.0):
     g = Graph(directed=graph.is_directed())
 
     vertex_map = {v: g.add_vertex() for v in graph.vertices()}
+
+    connectivity_in = graph.edge_properties["connectivity"]
+    connectivity_out = g.new_edge_property("string")
+
     for e in graph.edges():
-        g.add_edge(vertex_map[e.source()], vertex_map[e.target()])
+        new_e = g.add_edge(vertex_map[e.source()], vertex_map[e.target()])
+        connectivity_out[new_e] = connectivity_in[e]
+
+    g.edge_properties["connectivity"] = connectivity_out
+
+    edge_color = g.new_edge_property("vector<double>")
+
+    if colors is None:
+        colors = default_color_map(highlight="all")
+
+    for e in g.edges():
+        edge_color[e] = colors.get(connectivity_out[e], (0, 0, 0, 1))
 
     pos = g.new_vertex_property("vector<double>")
 
@@ -205,4 +108,109 @@ def draw_layered_graph(graph: Graph, neuron_counts: list[int], filename: str, wi
             pos[vertices[v_idx]] = (x, y0 + j * y_spacing)
             v_idx += 1
 
-    graph_draw(g, pos=pos, vertex_size=vertex_size, edge_pen_width=edge_pen_width, output_size=(width, height), output=filename)
+    graph_draw(g, pos=pos, vertex_size=vertex_size, edge_pen_width=edge_pen_width, edge_color=edge_color, output_size=(width, height), output=filename)
+
+# llm assisted
+def edge_reachability_figure(model: src.network.detail.NetworkInterface, filename: str) -> None:
+    # sloppy copy from training_utilities
+    def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]]:
+        modules = [module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)]
+        edge_reachabilities = []
+
+        for module in modules:
+            forward_reachability = torch.sum(module.forward_reachability * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
+            backward_reachability = torch.sum(module.backward_reachability * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
+            functional_reachability = torch.sum((module.forward_reachability.to(torch.bool) & module.backward_reachability.to(torch.bool)) * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
+            edge_reachabilities.append((forward_reachability, backward_reachability, functional_reachability))
+
+        return edge_reachabilities
+
+    # plotting helper
+    def plot_grouped_bars(data: List[tuple], filename: str, metric_names: List[str]) -> None:
+
+        data = numpy.array(data)  # shape: (num_entries, 3)
+        num_entries, num_metrics = data.shape
+        global_max = data.max()
+
+        palette = ["#6baed6", "#fd8d3c", "#74c476"]  # one color per metric
+        bar_width = 0.25
+        entry_gap = 0.15
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        entry_centers = []
+        current_x = 0
+        for e in range(num_entries):
+            x_positions = current_x + numpy.arange(num_metrics) * bar_width
+            ax.bar(
+                x_positions,
+                data[e],
+                width=bar_width,
+                color=palette[:num_metrics],
+                edgecolor="black",
+                linewidth=0.7,
+                label=metric_names if e == 0 else None
+            )
+
+            # center of the entry for x-tick
+            entry_center = x_positions[0] + (num_metrics * bar_width) / 2
+            entry_centers.append(entry_center)
+
+            current_x += num_metrics * bar_width + entry_gap
+
+        ax.set_xticks(entry_centers)
+        ax.set_xticklabels([f"Entry {i + 1}" for i in range(num_entries)], rotation=45, ha="right")
+        ax.set_ylim(0, global_max * 1.05)
+        ax.set_ylabel("Value")
+        ax.set_title("Triplet Metrics (Grouped)")
+        ax.legend(metric_names, ncol=num_metrics)
+        fig.tight_layout()
+
+        # Save the figure
+        fig.savefig(filename, dpi=300)
+        plt.close(fig)
+
+    model.compute_reachabilities()
+    reachabilities = edge_reachability(model)
+    plot_grouped_bars(reachabilities, filename, metric_names=["Forward", "Backward", "Functional"])
+
+def default_color_map(highlight: str = "all", alpha: float = 1.0) -> Dict[str, Tuple[float, float, float, float]]:
+
+    match highlight:
+        case "all":
+            return {
+                "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "f": (0.20, 0.60, 0.35, alpha), # dark green
+                "b": (0.70, 0.25, 0.25, alpha), # dark red/orange
+                "fb": (0.35, 0.35, 0.65, alpha), # dark muted purple/blue blend
+            }
+        case "f":
+            return {
+                "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "f": (0.20, 0.60, 0.35, alpha), # dark green
+                "b": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "fb": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+            }
+        case "b":
+            return {
+                "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "f": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "b": (0.70, 0.25, 0.25, alpha), # dark red/orange
+                "fb": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+            }
+        case "fb":
+            return {
+                "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "f": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "b": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "fb": (0.35, 0.35, 0.65, alpha), # dark muted purple/blue blend
+            }
+        case "f+b":
+            return {
+                "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "f": (0.20, 0.60, 0.35, alpha), # dark green
+                "b": (0.70, 0.25, 0.25, alpha), # dark red/orange
+                "fb": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+            }
+        case _:
+            raise RuntimeError("unsupported color scheme")

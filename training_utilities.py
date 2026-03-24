@@ -50,7 +50,7 @@ def update_mask(model: torch.nn.Module, pruning_strategies: List[src.rules.pruni
         for layer in (reversed(modules) if reversed_order else modules):
 
             # apply removal/regrowth only for layers that actually require it
-            if layer.realized_sparsity() < 1.0:
+            if 0.0 < layer.realized_sparsity() < 1.0:
 
                 # draw random strategy from the supplied list
                 pruning_index = numpy.random.randint(0, len(pruning_strategies))
@@ -121,7 +121,7 @@ def update_mask_redistribute(model: torch.nn.Module, warmup_strategy: src.rules.
 
         for layer_index, layer in enumerate(modules):
 
-            if layer.realized_sparsity() < 1.0:
+            if 0.0 < layer.realized_sparsity() < 1.0:
 
                 pruning_index = numpy.random.randint(0, len(pruning_strategies))
                 regrowth_index = numpy.random.randint(0, len(regrowth_strategies))

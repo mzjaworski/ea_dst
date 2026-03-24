@@ -42,7 +42,7 @@ def predict_connectivity(layer_sizes: List[Tuple[int, int]], sparsities: List[fl
 
     return R_fwd_e.tolist(), R_bwd_e.tolist(), R_fcnl_e.tolist()
 
-layers = [[3072, 1024], [1024, 512], [512, 512], [512, 768], [768, 512], [512, 368], [368, 512], [512, 100]]
+layers = [[3072, 1024], [1024, 512], [512, 512], [512, 100]]
 samples = 1
 
 for sparsity_level in numpy.linspace(0.99, 0.9999, 10):
@@ -52,7 +52,7 @@ for sparsity_level in numpy.linspace(0.99, 0.9999, 10):
     averages = None
 
     for _ in range(samples):
-        network = src.network.custom.SparseANN(layers=layers, sparsity=sparsity_level, act="relu", layernorm=True, method="erk")
+        network = src.network.custom.SparseANN(layers=layers, sparsity=[sparsity_level, sparsity_level, sparsity_level, 0.0], act="relu", layernorm=True, method="uniform")
         network.compute_reachabilities()
 
         layer_sparsities = [module.realized_sparsity() for module in network.modules() if isinstance(module, src.network.detail.MaskedLayer)]
