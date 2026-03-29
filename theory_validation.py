@@ -111,7 +111,7 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
         if bbox is not None:
             axins = inset_axes(
                 ax,
-                width="30%", height="20%",
+                width="42.5%", height="28.33%",
                 loc="lower left",
                 bbox_to_anchor=bbox,
                 bbox_transform=ax.transAxes,
@@ -159,8 +159,8 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
 
             fig, ax = plt.subplots()
 
-            ax.plot(x, lines[0])
-            ax.plot(x, lines[2])
+            ax.plot(x, lines[0], label="predicted")
+            ax.plot(x, lines[2], label="realized")
             ax.fill_between(x, lines[1], lines[3], alpha=0.2)
 
             plt.title(f"layer {layer_index} - {group_label} connectivity")
@@ -169,8 +169,10 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
 
             try:
                 lhs, rhs = derive_bounds(lines[0], margin=6)
-                add_inset(ax, x, lines, lhs, rhs, (0.05, 0.05, 1, 1))
+                add_inset(ax, x, lines, x[lhs], x[rhs], (0.05, 0.05, 1, 1))
+                ax.legend(loc="lower left", bbox_to_anchor=(0.05, 0.38), bbox_transform=ax.transAxes)
             except Exception as e:
+                ax.legend(loc="lower left", bbox_to_anchor=(0.05, 0.05), bbox_transform=ax.transAxes)
                 print(e)
 
             plt.savefig(folder + f"/layer_{layer_index}_{group_label}")
@@ -179,6 +181,7 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
 layers = [[3072, 1024], [1024, 512], [512, 512], [512, 100]]
 round_to = 3
 samples = 100
+levels = 100
 
 column_names = [[f"l{layer_index+1} predicted forward", f"l{layer_index+1} realized forward",
                  f"l{layer_index+1} predicted backward", f"l{layer_index+1} realized backward",
@@ -188,7 +191,7 @@ column_names = numpy.array(column_names).flatten().tolist()
 data = pandas.DataFrame(columns=column_names)
 data.index.name = "sparsity"
 
-for sparsity_level in tqdm(numpy.linspace(0.99, 0.9999, 100)):
+for sparsity_level in tqdm(numpy.linspace(0.99, 0.9999, levels)):
 
     sparsities = None
     averages = [[] for _ in range(len(layers))]
