@@ -122,9 +122,9 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
             axins = ax.inset_axes([0.05, 0.65, 0.3, 0.3])  # default inset location
 
         # Plot inset data
-        axins.plot(x, lines[0])
-        axins.plot(x, lines[2])
-        axins.fill_between(x, lower, upper, alpha=0.2)
+        _, = axins.plot(x, lines[0])
+        line_real, = axins.plot(x, lines[2])
+        axins.fill_between(x, lower, upper, color=line_real.get_color(), alpha=0.2)
 
         # Set limits
         axins.set_xlim(x1, x2)
@@ -160,9 +160,9 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
 
             fig, ax = plt.subplots()
 
-            ax.plot(x, lines[0], label="predicted")
-            ax.plot(x, lines[2], label="realized")
-            ax.fill_between(x, lines[1], lines[3], alpha=0.2)
+            _, = ax.plot(x, lines[0], label="predicted")
+            line_real, = ax.plot(x, lines[2], label="realized")
+            ax.fill_between(x, lines[1], lines[3], color=line_real.get_color(), alpha=0.2)
 
             plt.title(f"layer {layer_index} - {group_label} connectivity")
             plt.xlabel("sparsity")
