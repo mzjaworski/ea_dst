@@ -9,6 +9,7 @@ import os
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.ticker import PercentFormatter
 
 def predict_connectivity(layer_sizes: List[Tuple[int, int]], sparsities: List[float]):
     L = len(layer_sizes)
@@ -174,6 +175,9 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
             except Exception as e:
                 ax.legend(loc="lower left", bbox_to_anchor=(0.05, 0.05), bbox_transform=ax.transAxes)
                 print(e)
+
+            ax.xaxis.set_major_formatter(PercentFormatter(1.0))
+            ax.yaxis.set_major_formatter(PercentFormatter(1.0))
 
             plt.savefig(folder + f"/layer_{layer_index}_{group_label}")
             plt.close()
