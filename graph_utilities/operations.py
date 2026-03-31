@@ -174,29 +174,22 @@ def edge_reachability_figure(model: src.network.detail.NetworkInterface, filenam
     reachabilities = edge_reachability(model)
     plot_grouped_bars(reachabilities, filename, metric_names=["Forward", "Backward", "Functional"])
 
-def default_color_map(highlight: str = "all", alpha: float = 1.0) -> Dict[str, Tuple[float, float, float, float]]:
+def default_color_map(highlight: str = "f", alpha: float = 1.0) -> Dict[str, Tuple[float, float, float, float]]:
 
     match highlight:
-        case "all":
-            return {
-                "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
-                "f": (0.20, 0.60, 0.35, alpha), # dark green
-                "b": (0.70, 0.25, 0.25, alpha), # dark red/orange
-                "fb": (0.35, 0.35, 0.65, alpha), # dark muted purple/blue blend
-            }
         case "f":
             return {
                 "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
                 "f": (0.20, 0.60, 0.35, alpha), # dark green
                 "b": (0.575, 0.575, 0.575, alpha / 1.5), # gray
-                "fb": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "fb": (0.20, 0.60, 0.35, alpha), # gray
             }
         case "b":
             return {
                 "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
                 "f": (0.575, 0.575, 0.575, alpha / 1.5), # gray
                 "b": (0.70, 0.25, 0.25, alpha), # dark red/orange
-                "fb": (0.575, 0.575, 0.575, alpha / 1.5), # gray
+                "fb": (0.70, 0.25, 0.25, alpha), # gray
             }
         case "fb":
             return {
@@ -204,13 +197,6 @@ def default_color_map(highlight: str = "all", alpha: float = 1.0) -> Dict[str, T
                 "f": (0.575, 0.575, 0.575, alpha / 1.5), # gray
                 "b": (0.575, 0.575, 0.575, alpha / 1.5), # gray
                 "fb": (0.35, 0.35, 0.65, alpha), # dark muted purple/blue blend
-            }
-        case "f+b":
-            return {
-                "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
-                "f": (0.20, 0.60, 0.35, alpha), # dark green
-                "b": (0.70, 0.25, 0.25, alpha), # dark red/orange
-                "fb": (0.575, 0.575, 0.575, alpha / 1.5), # gray
             }
         case _:
             raise RuntimeError("unsupported color scheme")
