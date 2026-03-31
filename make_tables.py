@@ -48,6 +48,7 @@ if __name__ == "__main__":
     parser.add_argument('--title', default=None, type=str, help="optional plot title")
     parser.add_argument('--groups', default='{"DST": [], "EA": []}', type=json.loads, help="groups of log files to use for plotting")
     parser.add_argument('--save_to', default=None, type=str, help="place to store tables")
+    parser.add_argument("--caption", default=None, type=str, help="caption for table")
 
     # parse args
     args = parser.parse_args()
@@ -113,8 +114,8 @@ if __name__ == "__main__":
     data = data.sort_index(level=["Sparsity", "Setup"])
     latex = data.to_latex(column_format=("l|" * 2 + "c|" * len(needles))[:-1])
 
-    caption = "Results of different setups at various sparsities"
-    latex = f"\\begin{{table}}[ht]\n\\centering\n{latex}\\caption{{{caption}}}\n\\label{{tab:setup_results}}\n\\end{{table}}"
+    if args.caption is not None:
+        latex = f"\\begin{{table}}[ht]\n\\centering\n{latex}\\caption{{{args.caption}}}\n\\label{{tab:setup_results}}\n\\end{{table}}"
 
     if args.save_to is not None:
         directory = os.path.dirname(args.save_to)
