@@ -6,6 +6,8 @@ import argparse
 import json
 import re
 import os
+from pathlib import Path
+
 
 def float_pattern(filepath: str, needle: str) -> List[str]:
     search_pattern = re.compile(rf'\[{re.escape(needle)}::([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\]')
@@ -45,50 +47,82 @@ if __name__ == "__main__":
 
     parser.add_argument('--title', default=None, type=str, help="optional plot title")
     parser.add_argument('--groups', default='{"DST": [], "EA": []}', type=json.loads, help="groups of log files to use for plotting")
+    parser.add_argument('--save_to', default=None, type=str, help="place to store tables")
 
     # parse args
     args = parser.parse_args()
 
-    metrics = ["Top-1 Accuracy", "Top-3 Accuracy", "Top-5 Accuracy", "TFLOP", "train loss", "Active Weights", "Total Weights"]
-    needles = ["acc-top_1", "acc-top_3", "acc-top_5", "amortized_flops", "mean_loss", "active_weights", "total_weights"]
+    metrics = ["Accuracy", "Loss", "TFLOPs", "Active Weights", "Total Weights"]
+    needles = ["acc-top_1", "mean_loss", "amortized_flops", "active_weights", "total_weights"]
 
-    data = pandas.DataFrame(columns=metrics)
-    data.index.name = "setup"
+    setup_order = list(args.groups.keys())
 
-    for group_name, group_files in args.groups.items():
+    # store results as dict[(sparsity, setup)] -> {metric: value}
+    rows = {}
 
-        if not len(group_files):
+    for setup_name, group_files in args.groups.items():
+        if not group_files:
             raise RuntimeError("nothing to plot!")
 
-        # in case user passed directories retrieve all files inside, otherwise noop
-        group_files = get_files(group_files)
+        for file_group in group_files:
+            files = get_files([file_group])
+            sparsity = Path(file_group).parts[-1]  # top-level row
 
-        row_data = []
-        for (needle, metric) in zip(needles, metrics):
-            matches = [extract_needles_as_float(path, needle) for path in group_files]
+            # initialize the row key
+            row_key = (sparsity, setup_name)
+            row_data = {}
 
-            if needle in ["acc-top_1", "acc-top_3", "acc-top_5"]:
-                last_values = numpy.array(matches)[:, -1]
-                mean = numpy.mean(last_values)
-                std = numpy.std(last_values)
-                row_data.append(f"{round(mean, 2):.2f} ± {round(std, 2):.2f}%")
-            elif needle in ["amortized_flops"]:
-                last_values = numpy.array(matches)[:, -1]
-                mean = numpy.mean(last_values)
-                row_data.append(f"{round(mean / 1_000_000_000_000, 2):.2f}") # decimal
-            elif needle in ["active_weights", "total_weights"]:
-                last_values = numpy.array(matches)[:, -1]
-                mean = numpy.mean(last_values)
-                row_data.append(f"{int(mean)}")
-            elif needle in ["mean_loss"]:
-                last_values = numpy.array(matches)[:, -1]
-                mean = numpy.mean(last_values)
-                std = numpy.std(last_values)
-                row_data.append(f"{round(mean, 2):.2f} ± {round(std, 2):.2f}")
-            else:
-                row_data.append("-")
+            for needle, metric in zip(needles, metrics):
+                matches = [extract_needles_as_float(path, needle) for path in files]
+                matches = [m for m in matches if m is not None and len(m) > 0]
 
-        data.loc[group_name] = row_data
+                if not matches:
+                    value = "-"
+                else:
+                    last_values = numpy.array([m[-1] for m in matches])
+                    if needle == "acc-top_1":
+                        mean = numpy.mean(last_values)
+                        std = numpy.std(last_values)
+                        value = f"{mean:.2f} ± {std:.2f}\\%"
+                    elif needle == "amortized_flops":
+                        mean = numpy.mean(last_values)
+                        value = f"{mean / 1e12:.2f}"
+                    elif needle in ["active_weights", "total_weights"]:
+                        mean = numpy.mean(last_values)
+                        value = f"{int(mean)}"
+                    elif needle == "mean_loss":
+                        mean = numpy.mean(last_values)
+                        std = numpy.std(last_values)
+                        value = f"{mean:.2f} ± {std:.2f}"
+                    else:
+                        value = "-"
 
-    # print(data)
-    print(data.to_latex())
+                row_data[metric] = value
+
+            rows[row_key] = row_data
+
+    index = pandas.MultiIndex.from_tuples(rows.keys(), names=["Sparsity", "Setup"])
+    data = pandas.DataFrame(list(rows.values()), index=index, columns=metrics)
+
+    data = data.copy()
+    data.index = pandas.MultiIndex.from_arrays([
+        data.index.get_level_values("Sparsity").astype(int),
+        pandas.Categorical(data.index.get_level_values("Setup"), categories=setup_order, ordered=True)
+    ], names=["Sparsity", "Setup"])
+
+    data = data.sort_index(level=["Sparsity", "Setup"])
+    latex = data.to_latex(column_format=("l|" * 2 + "c|" * len(needles))[:-1])
+
+    caption = "Results of different setups at various sparsities"
+    latex = f"\\begin{{table}}[ht]\n\\centering\n{latex}\\caption{{{caption}}}\n\\label{{tab:setup_results}}\n\\end{{table}}"
+
+    if args.save_to is not None:
+        directory = os.path.dirname(args.save_to)
+
+        if not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+
+        with open(args.save_to, "w") as f:
+            f.write(latex)
+    else:
+        print(latex)

@@ -1,0 +1,10 @@
+# set 1
+# erk
+python ./make_tables.py --groups='{"DST": ["./data/logs/cifar10/custom/uniform/mag_uni/1/99", "./data/logs/cifar10/custom/uniform/mag_uni/1/995", "./data/logs/cifar10/custom/uniform/mag_uni/1/9975", "./data/logs/cifar10/custom/uniform/mag_uni/1/99875", "./data/logs/cifar10/custom/uniform/mag_uni/1/999"], "EA-DST 5p": ["./data/logs/cifar10/custom/uniform/mag_uni/5/99", "./data/logs/cifar10/custom/uniform/mag_uni/5/995", "./data/logs/cifar10/custom/uniform/mag_uni/5/9975", "./data/logs/cifar10/custom/uniform/mag_uni/5/99875", "./data/logs/cifar10/custom/uniform/mag_uni/5/999"], "EA-DST 10p": ["./data/logs/cifar10/custom/uniform/mag_uni/10/99", "./data/logs/cifar10/custom/uniform/mag_uni/10/995", "./data/logs/cifar10/custom/uniform/mag_uni/10/9975", "./data/logs/cifar10/custom/uniform/mag_uni/10/99875", "./data/logs/cifar10/custom/uniform/mag_uni/10/999"], "EA-DST 20p": ["./data/logs/cifar10/custom/uniform/mag_uni/20/99", "./data/logs/cifar10/custom/uniform/mag_uni/20/995", "./data/logs/cifar10/custom/uniform/mag_uni/20/9975", "./data/logs/cifar10/custom/uniform/mag_uni/20/99875", "./data/logs/cifar10/custom/uniform/mag_uni/20/999"], "Static Sparsity": ["./data/logs/cifar10/custom/uniform/static_sparsity/99", "./data/logs/cifar10/custom/uniform/static_sparsity/995", "./data/logs/cifar10/custom/uniform/static_sparsity/9975", "./data/logs/cifar10/custom/uniform/static_sparsity/99875", "./data/logs/cifar10/custom/uniform/static_sparsity/999"], "Small Dense": ["./data/logs/cifar10/custom/uniform/small_dense/99", "./data/logs/cifar10/custom/uniform/small_dense/995", "./data/logs/cifar10/custom/uniform/small_dense/9975", "./data/logs/cifar10/custom/uniform/small_dense/99875", "./data/logs/cifar10/custom/uniform/small_dense/999"]}'
+# uniform
+
+
+# set 2
+# erk
+
+# uniform
