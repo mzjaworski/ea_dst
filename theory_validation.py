@@ -176,7 +176,7 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
                 ax.legend(loc="lower left", bbox_to_anchor=(0.05, 0.05), bbox_transform=ax.transAxes)
                 print(e)
 
-            ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+            ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=2))
             ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
 
             plt.savefig(folder + f"/layer_{layer_index}_{group_label}")
@@ -184,7 +184,7 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
 
 layers = [[3072, 1024], [1024, 512], [512, 512], [512, 100]]
 round_to = 3
-samples = 3
+samples = 100
 levels = 100
 
 column_names = [[f"l{layer_index+1} predicted forward", f"l{layer_index+1} realized forward",
