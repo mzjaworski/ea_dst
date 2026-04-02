@@ -107,7 +107,7 @@ if __name__ == "__main__":
 
     data = data.copy()
     data.index = pandas.MultiIndex.from_arrays([
-        data.index.get_level_values("Sparsity").astype(int),
+        data.index.get_level_values("Sparsity"),
         pandas.Categorical(data.index.get_level_values("Setup"), categories=setup_order, ordered=True)
     ], names=["Sparsity", "Setup"])
 
