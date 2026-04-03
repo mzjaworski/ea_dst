@@ -9,5 +9,6 @@
   "pruning": {"type": "src.rules.pruning.MagnitudePruning", "kwargs": {"pruned_fraction": 0.25, "decay_rate": null}},
   "regrowth": {"type": "src.rules.regrowth.UniformRegrowth", "kwargs": {"weight_reinitialization": "zero"}},
   "decay": {"type": "src.rules.decay.NullDecay", "kwargs": {}},
-  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "parents": 1, "offspring": 20, "minibatch_budget": 800, "warmup": 0, "redistribute": false, "noise": 0.0}}
+  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "parents": 1, "offspring": 20, "minibatch_budget": 800, "warmup": 0, "redistribute": false, "noise": 0.0}},
+  "serialize": {"type": "src.serialize.FileSystemSerialization", "kwargs": {"path": "./data/models/cifar100/custom/uniform/mag_uni/20/9975/LOG_IDENTIFIER"}}
 }

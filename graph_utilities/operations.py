@@ -110,20 +110,35 @@ def layered_graph_figure(model: src.network.detail.NetworkInterface, filename: s
 
     graph_draw(g, pos=pos, vertex_size=vertex_size, edge_pen_width=edge_pen_width, edge_color=edge_color, output_size=(width, height), output=filename)
 
+# sloppy copy from training_utilities
+def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]]:
+    modules = [module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)]
+    edge_reachabilities = []
+
+    for module in modules:
+        forward_reachability = torch.sum(module.forward_reachability * module.mask != 0).item()
+        backward_reachability = torch.sum(module.backward_reachability * module.mask != 0).item()
+        functional_reachability = torch.sum((module.forward_reachability.to(torch.bool) & module.backward_reachability.to(torch.bool)) * module.mask != 0).item()
+        edge_reachabilities.append((forward_reachability, backward_reachability, functional_reachability))
+
+    return edge_reachabilities
+
+# sloppy copy from training_utilities
+def normalized_edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]]:
+    modules = [module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)]
+    edge_reachabilities = []
+
+    for module in modules:
+        forward_reachability = torch.sum(module.forward_reachability * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
+        backward_reachability = torch.sum(module.backward_reachability * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
+        functional_reachability = torch.sum((module.forward_reachability.to(torch.bool) & module.backward_reachability.to(torch.bool)) * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
+        edge_reachabilities.append((forward_reachability, backward_reachability, functional_reachability))
+
+    return edge_reachabilities
+
+
 # llm assisted
 def edge_reachability_figure(model: src.network.detail.NetworkInterface, filename: str) -> None:
-    # sloppy copy from training_utilities
-    def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]]:
-        modules = [module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)]
-        edge_reachabilities = []
-
-        for module in modules:
-            forward_reachability = torch.sum(module.forward_reachability * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
-            backward_reachability = torch.sum(module.backward_reachability * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
-            functional_reachability = torch.sum((module.forward_reachability.to(torch.bool) & module.backward_reachability.to(torch.bool)) * module.mask != 0).item() / module.active_weights() if module.active_weights() > 0 else 0
-            edge_reachabilities.append((forward_reachability, backward_reachability, functional_reachability))
-
-        return edge_reachabilities
 
     # plotting helper
     def plot_grouped_bars(data: List[tuple], filename: str, metric_names: List[str]) -> None:
@@ -171,7 +186,7 @@ def edge_reachability_figure(model: src.network.detail.NetworkInterface, filenam
         plt.close(fig)
 
     model.compute_reachabilities()
-    reachabilities = edge_reachability(model)
+    reachabilities = normalized_edge_reachability(model)
     plot_grouped_bars(reachabilities, filename, metric_names=["Forward", "Backward", "Functional"])
 
 def default_color_map(highlight: str = "f", alpha: float = 1.0) -> Dict[str, Tuple[float, float, float, float]]:
