@@ -42,6 +42,21 @@ def get_files(filepaths: List[str]) -> List[str]:
 
     return files
 
+def format_number(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f} M"
+    elif n >= 1_000:
+        return f"{n / 1_000:.2f} K"
+    else:
+        return str(n)
+
+def format_flops_scientific(flops: float) -> str:
+    if flops == 0:
+        return "0"
+    exponent = int(f"{flops:e}".split('e')[1])
+    mantissa = flops / (10 ** exponent)
+    return f"{mantissa:.2f} * 10^" + "{" + str(exponent) + "}"
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='make_plots', description='script used to automate making plots')
 
@@ -54,7 +69,7 @@ if __name__ == "__main__":
     # parse args
     args = parser.parse_args()
 
-    metrics = ["Accuracy", "Loss", "TFLOPs", "Active Weights", "Total Weights"]
+    metrics = ["Accuracy", "Loss", "Training FLOPs", "Parameters (Active)", "Parameters (Total)"]
     needles = ["acc-top_1", "mean_loss", "amortized_flops", "active_weights", "total_weights"]
 
     setup_order = list(args.groups.keys())
@@ -89,21 +104,20 @@ if __name__ == "__main__":
                         last_acc_values = last_values
                     elif metric == "Loss":
                         last_loss_values = last_values
-
                     if needle == "acc-top_1":
                         mean = numpy.mean(last_values)
                         std = numpy.std(last_values)
-                        value = f"{mean:.2f} ± {std:.2f}\\%"
+                        value = f"${mean:.2f} \\pm {std:.2f}\\%$"
                     elif needle == "amortized_flops":
                         mean = numpy.mean(last_values)
-                        value = f"{mean / 1e12:.2f}"
+                        value = f"${format_flops_scientific(mean)}$"
                     elif needle in ["active_weights", "total_weights"]:
                         mean = numpy.mean(last_values)
-                        value = f"{int(mean)}"
+                        value = f"${format_number(mean)}$"
                     elif needle == "mean_loss":
                         mean = numpy.mean(last_values)
                         std = numpy.std(last_values)
-                        value = f"{mean:.2f} ± {std:.2f}"
+                        value = f"${mean:.2f} \\pm {std:.2f}$"
                     else:
                         value = "-"
 
@@ -118,15 +132,11 @@ if __name__ == "__main__":
                                 dst_means.setdefault(sparsity, {})["Accuracy"] = numpy.mean(last_acc_values)
                             else:
                                 dst_means.setdefault(sparsity, {})["Loss"] = numpy.mean(last_loss_values)
-                        elif not setup_name in ["Static Sparsity", "Small Dense"]:
-                            delta_values = last_values - dst_means[sparsity][metric]
-                            if metric == "Accuracy":
-                                delta_val = f"{numpy.mean(delta_values):.2f} ± {numpy.std(delta_values):.2f}\\%"
-                            else:
-                                delta_val = f"{numpy.mean(delta_values):.2f} ± {numpy.std(delta_values):.2f}"
+                        else:
+                            delta_values = 100.0 * (last_values - dst_means[sparsity][metric]) / dst_means[sparsity][metric]
+                            delta_val = f"${numpy.mean(delta_values):.2f} \\pm {numpy.std(delta_values):.2f}\\%$"
 
-                        row_data[f"$\\Delta$ {metric}"] = delta_val
-
+                        row_data[f"{metric} $\\Delta$ [\\%]"] = delta_val
             rows[row_key] = row_data
 
     ordered_columns = []
@@ -135,16 +145,16 @@ if __name__ == "__main__":
         ordered_columns.append(m)
         if args.deltas:
             if m in ["Accuracy", "Loss"]:
-                ordered_columns.append(f"$\\Delta$ {m}")
+                ordered_columns.append(f"{m} $\\Delta$ [\\%]")
 
-    data = pandas.DataFrame(list(rows.values()), index=pandas.MultiIndex.from_tuples(rows.keys(), names=["Sparsity", "Setup"]))
+    data = pandas.DataFrame(list(rows.values()), index=pandas.MultiIndex.from_tuples(rows.keys(), names=["Sparsity [\\%]", "Method"]))
     data = data[ordered_columns]
 
     data.index = pandas.MultiIndex.from_arrays([
-        data.index.get_level_values("Sparsity"),
-        pandas.Categorical(data.index.get_level_values("Setup"), categories=setup_order, ordered=True)
-    ], names=["Sparsity", "Setup"])
-    data = data.sort_index(level=["Sparsity", "Setup"])
+        data.index.get_level_values("Sparsity [\\%]"),
+        pandas.Categorical(data.index.get_level_values("Method"), categories=setup_order, ordered=True)
+    ], names=["Sparsity [\\%]", "Method"])
+    data = data.sort_index(level=["Sparsity [\\%]", "Method"])
 
     latex = data.to_latex(column_format=("l|" * 2 + "c|" * len(ordered_columns))[:-1])
 
