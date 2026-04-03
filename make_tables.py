@@ -49,6 +49,7 @@ if __name__ == "__main__":
     parser.add_argument('--groups', default='{"DST": [], "EA": []}', type=json.loads, help="groups of log files to use for plotting")
     parser.add_argument('--save_to', default=None, type=str, help="place to store tables")
     parser.add_argument("--caption", default=None, type=str, help="caption for table")
+    parser.add_argument('--deltas', default=True, type=bool, action=argparse.BooleanOptionalAction, help='add deltas or not')
 
     # parse args
     args = parser.parse_args()
@@ -58,8 +59,8 @@ if __name__ == "__main__":
 
     setup_order = list(args.groups.keys())
 
-    # store results as dict[(sparsity, setup)] -> {metric: value}
     rows = {}
+    dst_means = {}
 
     for setup_name, group_files in args.groups.items():
         if not group_files:
@@ -67,11 +68,13 @@ if __name__ == "__main__":
 
         for file_group in group_files:
             files = get_files([file_group])
-            sparsity = Path(file_group).parts[-1]  # top-level row
+            sparsity = Path(file_group).parts[-1]
 
-            # initialize the row key
             row_key = (sparsity, setup_name)
             row_data = {}
+
+            last_acc_values = []
+            last_loss_values = []
 
             for needle, metric in zip(needles, metrics):
                 matches = [extract_needles_as_float(path, needle) for path in files]
@@ -81,6 +84,12 @@ if __name__ == "__main__":
                     value = "-"
                 else:
                     last_values = numpy.array([m[-1] for m in matches])
+
+                    if metric == "Accuracy":
+                        last_acc_values = last_values
+                    elif metric == "Loss":
+                        last_loss_values = last_values
+
                     if needle == "acc-top_1":
                         mean = numpy.mean(last_values)
                         std = numpy.std(last_values)
@@ -100,19 +109,44 @@ if __name__ == "__main__":
 
                 row_data[metric] = value
 
+                if args.deltas:
+                    if metric in ["Accuracy", "Loss"]:
+                        delta_val = "-"
+
+                        if setup_name == "DST":
+                            if metric == "Accuracy":
+                                dst_means.setdefault(sparsity, {})["Accuracy"] = numpy.mean(last_acc_values)
+                            else:
+                                dst_means.setdefault(sparsity, {})["Loss"] = numpy.mean(last_loss_values)
+                        elif not setup_name in ["Static Sparsity", "Small Dense"]:
+                            delta_values = last_values - dst_means[sparsity][metric]
+                            if metric == "Accuracy":
+                                delta_val = f"{numpy.mean(delta_values):.2f} ± {numpy.std(delta_values):.2f}\\%"
+                            else:
+                                delta_val = f"{numpy.mean(delta_values):.2f} ± {numpy.std(delta_values):.2f}"
+
+                        row_data[f"$\\Delta$ {metric}"] = delta_val
+
             rows[row_key] = row_data
 
-    index = pandas.MultiIndex.from_tuples(rows.keys(), names=["Sparsity", "Setup"])
-    data = pandas.DataFrame(list(rows.values()), index=index, columns=metrics)
+    ordered_columns = []
 
-    data = data.copy()
+    for m in metrics:
+        ordered_columns.append(m)
+        if args.deltas:
+            if m in ["Accuracy", "Loss"]:
+                ordered_columns.append(f"$\\Delta$ {m}")
+
+    data = pandas.DataFrame(list(rows.values()), index=pandas.MultiIndex.from_tuples(rows.keys(), names=["Sparsity", "Setup"]))
+    data = data[ordered_columns]
+
     data.index = pandas.MultiIndex.from_arrays([
         data.index.get_level_values("Sparsity"),
         pandas.Categorical(data.index.get_level_values("Setup"), categories=setup_order, ordered=True)
     ], names=["Sparsity", "Setup"])
-
     data = data.sort_index(level=["Sparsity", "Setup"])
-    latex = data.to_latex(column_format=("l|" * 2 + "c|" * len(needles))[:-1])
+
+    latex = data.to_latex(column_format=("l|" * 2 + "c|" * len(ordered_columns))[:-1])
 
     if args.caption is not None:
         latex = f"\\begin{{table}}[ht]\n\\centering\n{latex}\\caption{{{args.caption}}}\n\\label{{tab:setup_results}}\n\\end{{table}}"
