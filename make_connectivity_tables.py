@@ -133,5 +133,7 @@ if __name__ == "__main__":
 
         with open(args.save_to, "w") as f:
             f.write(latex)
+
+        data.to_csv(args.save_to + ".csv")
     else:
         print(latex)
