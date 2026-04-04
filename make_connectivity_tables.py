@@ -28,6 +28,26 @@ def get_files(filepaths: List[str]) -> List[str]:
 
     return files
 
+def determine_input_size(main: str) -> int:
+    if "cifar100" in main:
+        return 3072
+    elif "cifar10" in main:
+        return 3072
+    elif "tiny_imagenet" in main:
+        return 12288
+    else:
+        raise RuntimeError("cannot determine input size!")
+
+def determine_output_size(main: str) -> int:
+    if "cifar100" in main:
+        return 100
+    elif "cifar10" in main:
+        return 10
+    elif "tiny_imagenet" in main:
+        return 200
+    else:
+        raise RuntimeError("cannot determine output size!")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='make_plots', description='script used to automate making plots')
     parser.add_argument('--groups', default='{"DST": [], "EA": []}', type=json.loads, help="groups of log files to use for plotting")
@@ -37,6 +57,8 @@ if __name__ == "__main__":
     # parse args
     args = parser.parse_args()
 
+    setup_order = list(args.groups.keys())
+
     rows = []
 
     for setup_name, group_files in args.groups.items():
@@ -45,7 +67,7 @@ if __name__ == "__main__":
             sparsity = Path(file_group).parts[-1]
 
             for file in files:
-                network = src.network.custom.SparseANN()
+                network = src.network.custom.SparseANN(layers=[(determine_input_size(file), 1024), (1024, 512), (512, 512), (512, determine_output_size(file))])
                 network.load_state_dict(torch.load(file, map_location="cpu"))
 
                 network.compute_reachabilities()
@@ -56,39 +78,45 @@ if __name__ == "__main__":
                 functional = sum(fn for (_, _, fn) in total) / network.active_weights() * 100.0
 
                 rows.append({
-                    "sparsity": sparsity,
-                    "method": setup_name,
-                    "forward": forward,
-                    "backward": backward,
-                    "functional": functional,
+                    "Sparsity [\\%]": sparsity,
+                    "Method": setup_name,
+                    "Forward": forward,
+                    "Backward": backward,
+                    "Functional": functional,
                 })
 
     df = pandas.DataFrame(rows)
 
     data = (
-        df.groupby(["sparsity", "method"])
+        df.groupby(["Sparsity [\\%]", "Method"])
         .agg({
-            "forward": ["mean", "std"],
-            "backward": ["mean", "std"],
-            "functional": ["mean", "std"],
+            "Forward": ["mean", "std"],
+            "Backward": ["mean", "std"],
+            "Functional": ["mean", "std"],
         })
         .reset_index()
     )
 
     data.columns = [
-        "sparsity", "method",
+        "Sparsity [\\%]", "Method",
         "fwd_mean", "fwd_std",
         "bwd_mean", "bwd_std",
         "func_mean", "func_std"
     ]
 
-    data["forward [\\%]"] = data.apply(lambda r: f"${r['fwd_mean']:.2f} \\pm {r['fwd_std']:.2f}\\%$", axis=1)
-    data["backward [\\%]"] = data.apply(lambda r: f"${r['bwd_mean']:.2f} \\pm {r['bwd_std']:.2f}\\%$", axis=1)
-    data["functional [\\%]"] = data.apply(lambda r: f"${r['func_mean']:.2f} \\pm {r['func_std']:.2f}\\%$", axis=1)
+    data["Forward [\\%]"] = data.apply(lambda r: f"${r['fwd_mean']:.2f} \\pm {r['fwd_std']:.2f}\\%$", axis=1)
+    data["Backward [\\%]"] = data.apply(lambda r: f"${r['bwd_mean']:.2f} \\pm {r['bwd_std']:.2f}\\%$", axis=1)
+    data["Functional [\\%]"] = data.apply(lambda r: f"${r['func_mean']:.2f} \\pm {r['func_std']:.2f}\\%$", axis=1)
 
-    data = data[["sparsity", "method", "forward [\\%]", "backward [\\%]", "functional [\\%]"]]
-    data = data.sort_values(["sparsity", "method"])
-    data = data.set_index(["sparsity", "method"])
+    data = data[["Sparsity [\\%]", "Method", "Forward [\\%]", "Backward [\\%]", "Functional [\\%]"]]
+    data.index = pandas.MultiIndex.from_arrays([
+        data["Sparsity [\\%]"],
+        pandas.Categorical(data["Method"], categories=setup_order, ordered=True)
+    ], names=["Sparsity [\\%]", "Method"])
+    data = data.sort_index(level=["Sparsity [\\%]", "Method"])
+
+    # data = data.sort_values(["Sparsity", "Method"])
+    # data = data.set_index(["Sparsity", "Method"])
 
     latex = data.to_latex(
         escape=False,

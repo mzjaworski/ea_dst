@@ -9,5 +9,6 @@
   "pruning": {"type": "src.rules.pruning.NullPruning", "kwargs": {}},
   "regrowth": {"type": "src.rules.regrowth.NullRegrowth", "kwargs": {}},
   "decay": {"type": "src.rules.decay.NullDecay", "kwargs": {}},
-  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "parents": 1, "offspring": 1, "minibatch_budget": 800, "warmup": 0, "redistribute": false, "noise": 0.0}}
+  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "parents": 1, "offspring": 1, "minibatch_budget": 800, "warmup": 0, "redistribute": false, "noise": 0.0}},
+  "serialize": {"type": "src.serialize.FileSystemSerialization", "kwargs": {"path": "./data/models/cifar10/custom/uniform/static_sparsity/99875/LOG_IDENTIFIER"}}
 }
