@@ -21,16 +21,9 @@ class NullSerialization(Serialization):
 class FileSystemSerialization(Serialization):
 
     def __init__(self, path: str) -> None:
-        self.path = os.path.dirname(path)
-        os.makedirs(self.path, exist_ok=True)
-
-    def __next_file_name(self) -> str:
-        data = f"{time.time_ns()}:{os.getpid()}".encode()
-        h = hashlib.blake2b(data, digest_size=6).hexdigest()
-        return f"{h}.pt"
+        self.path = os.path.splitext(path)[0] + ".pt"
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
 
     def serialize(self, models: List[torch.nn.Module]) -> None:
         for model in models:
-            filename = self.__next_file_name()
-            filepath = os.path.join(self.path, filename)
-            torch.save(model.state_dict(), filepath)
+            torch.save(model.state_dict(), self.path)
