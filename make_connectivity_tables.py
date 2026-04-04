@@ -114,9 +114,7 @@ if __name__ == "__main__":
         pandas.Categorical(data["Method"], categories=setup_order, ordered=True)
     ], names=["Sparsity [\\%]", "Method"])
     data = data.sort_index(level=["Sparsity [\\%]", "Method"])
-
-    # data = data.sort_values(["Sparsity", "Method"])
-    # data = data.set_index(["Sparsity", "Method"])
+    data = data.drop(columns=["Sparsity [\\%]", "Method"])
 
     latex = data.to_latex(
         escape=False,
