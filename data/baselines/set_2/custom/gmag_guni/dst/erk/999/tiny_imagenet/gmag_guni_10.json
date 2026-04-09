@@ -9,5 +9,6 @@
   "pruning": {"type": "src.rules.pruning.GuidedMagnitudePruning", "kwargs": {"pruned_fraction": 0.25, "decay_rate": null}},
   "regrowth": {"type": "src.rules.regrowth.GuidedUniformRegrowth", "kwargs": {"weight_reinitialization": "zero", "boost": 0.99}},
   "decay": {"type": "src.rules.decay.NullDecay", "kwargs": {}},
-  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "parents": 1, "offspring": 10, "minibatch_budget": 800, "warmup": 0, "redistribute": false, "noise": 0.0}}
+  "mode": {"type": "train_epoch", "kwargs": {"device": "DEVICE_LOCATION", "epochs": 100, "parents": 1, "offspring": 10, "minibatch_budget": 800, "warmup": 0, "redistribute": false, "noise": 0.0}},
+  "serialize": {"type": "src.serialize.FileSystemSerialization", "kwargs": {"path": "./data/models/tiny_imagenet/custom/erk/gmag_guni/10/999/LOG_IDENTIFIER"}}
 }
