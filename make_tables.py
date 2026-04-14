@@ -64,7 +64,7 @@ if __name__ == "__main__":
     parser.add_argument('--groups', default='{"DST": [], "EA": []}', type=json.loads, help="groups of log files to use for plotting")
     parser.add_argument('--save_to', default=None, type=str, help="place to store tables")
     parser.add_argument("--caption", default=None, type=str, help="caption for table")
-    parser.add_argument('--deltas', default=True, type=bool, action=argparse.BooleanOptionalAction, help='add deltas or not')
+    parser.add_argument('--deltas', default=False, type=bool, action=argparse.BooleanOptionalAction, help='add deltas or not')
 
     # parse args
     args = parser.parse_args()

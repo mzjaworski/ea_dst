@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 from graph_tool.all import *
 import numpy
 import torch
+from PIL import Image
+import os
 
 import src.network.detail
 
@@ -60,6 +62,18 @@ def convert_to_graph(model: src.network.detail.NetworkInterface) -> Tuple[graph_
 
     return graph, [len(layer) for layer in vertices]
 
+def downsample_image(input_path: str, output_path: str = None, max_size: tuple = (1920, 1920), quality: int = 85) -> str:
+    if output_path is None:
+        base, _ = os.path.splitext(input_path)
+        output_path = f"{base}_small.jpg"
+
+    with Image.open(input_path) as img:
+        img = img.convert("RGB")
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        img.save(output_path, format="JPEG", quality=quality, optimize=True)
+
+    return output_path
+
 # llm assisted
 def layered_graph_figure(model: src.network.detail.NetworkInterface, filename: str, width: int = 8000, height: int = 6000, margin: float = 100.0, vertex_size: float = 12, edge_pen_width: float = 1.0, colors: Dict[str, Tuple[float, float, float, float]] = None):
     from graph_tool.all import Graph, graph_draw
@@ -81,7 +95,7 @@ def layered_graph_figure(model: src.network.detail.NetworkInterface, filename: s
     edge_color = g.new_edge_property("vector<double>")
 
     if colors is None:
-        colors = default_color_map(highlight="all")
+        colors = default_color_map(highlight="no")
 
     for e in g.edges():
         edge_color[e] = colors.get(connectivity_out[e], (0, 0, 0, 1))
@@ -108,7 +122,8 @@ def layered_graph_figure(model: src.network.detail.NetworkInterface, filename: s
             pos[vertices[v_idx]] = (x, y0 + j * y_spacing)
             v_idx += 1
 
-    graph_draw(g, pos=pos, vertex_size=vertex_size, edge_pen_width=edge_pen_width, edge_color=edge_color, output_size=(width, height), output=filename)
+    graph_draw(g, pos=pos, vertex_size=vertex_size, edge_pen_width=edge_pen_width, edge_color=edge_color, output_size=(width, height), output=filename, bg_color=[1, 1, 1, 1])
+    downsample_image(filename)
 
 # sloppy copy from training_utilities
 def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]]:
@@ -192,6 +207,13 @@ def edge_reachability_figure(model: src.network.detail.NetworkInterface, filenam
 def default_color_map(highlight: str = "f", alpha: float = 1.0) -> Dict[str, Tuple[float, float, float, float]]:
 
     match highlight:
+        case "no":
+            return {
+                "n": (0.575, 0.575, 0.575, alpha), # gray
+                "f": (0.575, 0.575, 0.575, alpha), # gray
+                "b": (0.575, 0.575, 0.575, alpha), # gray
+                "fb": (0.575, 0.575, 0.575, alpha), # gray
+            }
         case "f":
             return {
                 "n": (0.575, 0.575, 0.575, alpha / 1.5), # gray
