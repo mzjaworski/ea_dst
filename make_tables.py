@@ -7,6 +7,7 @@ import json
 import re
 import os
 from pathlib import Path
+import math
 
 
 def float_pattern(filepath: str, needle: str) -> List[str]:
@@ -50,12 +51,15 @@ def format_number(n: int) -> str:
     else:
         return str(n)
 
-def format_flops_scientific(flops: float) -> str:
+def format_flops_scientific(flops: float, exponent: int | None = 12) -> str:
     if flops == 0:
         return "0"
-    exponent = int(f"{flops:e}".split('e')[1])
+
+    if exponent is None:
+        exponent = int(math.floor(math.log10(abs(flops))))
+
     mantissa = flops / (10 ** exponent)
-    return f"{mantissa:.2f} * 10^" + "{" + str(exponent) + "}"
+    return f"{mantissa:.2f} * 10^{{{exponent}}}"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='make_plots', description='script used to automate making plots')
