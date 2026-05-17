@@ -102,6 +102,7 @@ if __name__ == "__main__":
     parser.add_argument('--dpi', default=100, type=int, help='dots per inch (dpi) of the image')
     parser.add_argument('--range', default='null', type=str, help='range of values to plot')
     parser.add_argument('--average', default='null', type=str, help='range of values to plot')
+    parser.add_argument('--legend_location', default='lower left', type=str, help='')
 
     # parse args
     args = parser.parse_args()
@@ -190,7 +191,7 @@ if __name__ == "__main__":
             axis.fill_between(means[1], lower_bounds[0], upper_bounds[0], color=axis.lines[-1].get_color(), alpha=0.35)
 
     plt.grid(True)
-    plt.legend()
+    plt.legend(loc=args.legend_location, fontsize=8)
     plt.tight_layout()
 
     if args.save_to is not None:
