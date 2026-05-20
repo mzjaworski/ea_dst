@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 from typing import List, Tuple
+from cycler import cycler
 import scipy.stats
 import argparse
 import utilities
@@ -103,11 +104,13 @@ if __name__ == "__main__":
     parser.add_argument('--range', default='null', type=str, help='range of values to plot')
     parser.add_argument('--average', default='null', type=str, help='range of values to plot')
     parser.add_argument('--legend_location', default='lower left', type=str, help='')
+    parser.add_argument('--colors', default='["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]', type=str, help='')
 
     # parse args
     args = parser.parse_args()
     args.range = json.loads(args.range)
     args.average = json.loads(args.average)
+    args.colors = cycler(color=json.loads(args.colors))
 
     if not len(args.needles):
         raise RuntimeError("nothing to plot!")
@@ -136,7 +139,7 @@ if __name__ == "__main__":
 
     plt.title(args.title)
 
-    for group_name, group_files in args.groups.items():
+    for (cycle, (group_name, group_files)) in zip(args.colors, args.groups.items()):
 
         if not len(group_files):
             raise RuntimeError("nothing to plot!")
@@ -209,7 +212,7 @@ if __name__ == "__main__":
             means.append(list(range(len(means[0]))))
 
         axis = plt.gca()
-        axis.plot(means[1], means[0], label=group_name, linewidth=2)
+        line, = axis.plot(means[1], means[0], label=group_name, color=cycle['color'], linewidth=2)
 
         if "selection_effectiveness" in args.needles:
             axis.set_ylim(0, 2.25)
