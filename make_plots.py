@@ -149,7 +149,39 @@ if __name__ == "__main__":
         upper_bounds = []
         
         for needle in args.needles:
-            matches = [extract_needles_as_float(path, needle) for path in group_files]
+
+            if needle == "selection_effectiveness":
+                best = [extract_needles_as_float(path, "fitness_best") for path in group_files]
+                p_mean = [extract_needles_as_float(path, "p_mean_fitness") for path in group_files]
+                p_std = [extract_needles_as_float(path, "p_std_fitness") for path in group_files]
+
+                if "DST" == group_name:
+                   run_size = 1
+                elif "EA-DST $\\lambda$=5" == group_name:
+                    run_size = 5
+                elif "EA-DST $\\lambda$=10" == group_name:
+                    run_size = 10
+                elif "EA-DST $\\lambda$=20" == group_name:
+                    run_size = 20
+
+                matches = []
+                for best_run, mean_run, std_run in zip(best, p_mean, p_std):
+
+                    run_matches = []
+                    for best_value, population_mean, population_std in zip(best_run, mean_run, std_run):
+
+                        if population_std != 0 and run_size > 1:
+                            z_score = (population_mean - best_value) / population_std
+                            z_n = scipy.stats.norm.ppf((run_size - 0.375) / (run_size + 0.25)) # Blom's approximation, see: https://pjsor.com/pjsor/article/view/4411/1306
+                            value = z_score - z_n
+                        else:
+                            value = 0.0
+
+                        run_matches.append(value)
+
+                    matches.append(run_matches)
+            else:
+                matches = [extract_needles_as_float(path, needle) for path in group_files]
             
             if not len(matches):
                 raise RuntimeError(f"couldn't match any '{needle}' in the specified directories {group_files}")
@@ -158,9 +190,9 @@ if __name__ == "__main__":
 
             if args.average is not None:
                 if needle in args.average:
-                    mean = simple_moving_average(mean, 15)
-                    lower_bound = simple_moving_average(lower_bound, 15)
-                    upper_bound = simple_moving_average(upper_bound, 15)
+                    mean = simple_moving_average(mean, 12)
+                    lower_bound = simple_moving_average(lower_bound, 12)
+                    upper_bound = simple_moving_average(upper_bound, 12)
 
             if args.range is not None:
                 lower, upper = args.range
@@ -178,6 +210,9 @@ if __name__ == "__main__":
 
         axis = plt.gca()
         axis.plot(means[1], means[0], label=group_name, linewidth=2)
+
+        if "selection_effectiveness" in args.needles:
+            axis.set_ylim(0, 2.25)
 
         # set formatters
         if args.formatters[0] is not None:
