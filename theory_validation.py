@@ -161,7 +161,7 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
             fig, ax = plt.subplots()
 
             _, = ax.plot(x, lines[0], label="predicted")
-            line_real, = ax.plot(x, lines[2], label="realized")
+            line_real, = ax.plot(x, lines[2], label="realized", linestyle="--")
             ax.fill_between(x, lines[1], lines[3], color=line_real.get_color(), alpha=0.2)
 
             plt.title(f"layer {layer_index} - {group_label} connectivity")

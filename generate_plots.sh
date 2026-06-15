@@ -71,7 +71,6 @@ python ./make_plots.py --groups='{"SMALL DENSE": ["./data/logs/cifar100/custom/u
 python ./make_plots.py --groups='{"SMALL DENSE": ["./data/logs/tiny_imagenet/custom/uniform/small_dense/999"], "STATIC SPARSITY": ["./data/logs/tiny_imagenet/custom/uniform/static_sparsity/999"], "DST": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/1/999"], "EA-DST $\\lambda$=5": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/5/999"], "EA-DST $\\lambda$=10": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/10/999"], "EA-DST $\\lambda$=20": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/20/999"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99.9%' --save_to='./data/images/set_1/uniform_tiny_imagenet_999_loss.png' --legend_location="lower left"
 python ./make_plots.py --groups='{"SMALL DENSE": ["./data/logs/tiny_imagenet/custom/uniform/small_dense/999"], "STATIC SPARSITY": ["./data/logs/tiny_imagenet/custom/uniform/static_sparsity/999"], "DST": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/1/999"], "EA-DST $\\lambda$=5": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/5/999"], "EA-DST $\\lambda$=10": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/10/999"], "EA-DST $\\lambda$=20": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/20/999"]}' --needles='["acc-top_1", "epoch"]' --labels='["epoch", "accuracy [%]"]' --formatters='[null, "matplotlib.ticker.PercentFormatter"]' --title='Test Accuracy: s=99.9%' --save_to='./data/images/set_1/uniform_tiny_imagenet_999_test_acc.png' --legend_location="upper left"
 
-
 # set 2
 # erk
 python ./make_plots.py --groups='{"SMALL DENSE": ["./data/logs/cifar10/custom/erk/small_dense/99"], "STATIC SPARSITY": ["./data/logs/cifar10/custom/erk/static_sparsity/99"], "DST": ["./data/logs/cifar10/custom/erk/gmag_guni/1/99"], "EA-DST $\\lambda$=5": ["./data/logs/cifar10/custom/erk/gmag_guni/5/99"], "EA-DST $\\lambda$=10": ["./data/logs/cifar10/custom/erk/gmag_guni/10/99"], "EA-DST $\\lambda$=20": ["./data/logs/cifar10/custom/erk/gmag_guni/20/99"]}' --needles='["mean_loss", "epoch"]' --labels='["epoch", "loss"]' --title='Training Loss: s=99%' --save_to='./data/images/set_2/erk_cifar10_99_loss.png' --legend_location="lower left"
@@ -147,11 +146,6 @@ python ./make_plots.py --groups='{"SMALL DENSE": ["./data/logs/tiny_imagenet/cus
 
 
 
-
-
-
-
-
 # set 1
 # erk
 python ./make_plots.py --groups='{"DST": ["./data/logs/cifar10/custom/erk/mag_uni/1/99"], "EA-DST $\\lambda$=5": ["./data/logs/cifar10/custom/erk/mag_uni/5/99"], "EA-DST $\\lambda$=10": ["./data/logs/cifar10/custom/erk/mag_uni/10/99"], "EA-DST $\\lambda$=20": ["./data/logs/cifar10/custom/erk/mag_uni/20/99"]}' --needles='["selection_effectiveness", "epoch"]' --labels='["epoch", "selection effectiveness [z-score residual]"]' --title='Selection Effectiveness (Blom adjusted best z-score): s=99%' --save_to='./data/images/set_1/erk_cifar10_99_selection_effectiveness.png' --legend_location="upper left" --average='["selection_effectiveness"]' --no-ci --colors='["#2ca02c", "#d62728", "#9467bd", "#8c564b"]'
@@ -194,7 +188,6 @@ python ./make_plots.py --groups='{"DST": ["./data/logs/tiny_imagenet/custom/unif
 python ./make_plots.py --groups='{"DST": ["./data/logs/cifar10/custom/uniform/mag_uni/1/999"], "EA-DST $\\lambda$=5": ["./data/logs/cifar10/custom/uniform/mag_uni/5/999"], "EA-DST $\\lambda$=10": ["./data/logs/cifar10/custom/uniform/mag_uni/10/999"], "EA-DST $\\lambda$=20": ["./data/logs/cifar10/custom/uniform/mag_uni/20/999"]}' --needles='["selection_effectiveness", "epoch"]' --labels='["epoch", "selection effectiveness [z-score residual]"]' --title='Selection Effectiveness (Blom adjusted best z-score): s=99.9%' --save_to='./data/images/set_1/uniform_cifar10_999_selection_effectiveness.png' --legend_location="upper left" --average='["selection_effectiveness"]' --no-ci --colors='["#2ca02c", "#d62728", "#9467bd", "#8c564b"]'
 python ./make_plots.py --groups='{"DST": ["./data/logs/cifar100/custom/uniform/mag_uni/1/999"], "EA-DST $\\lambda$=5": ["./data/logs/cifar100/custom/uniform/mag_uni/5/999"], "EA-DST $\\lambda$=10": ["./data/logs/cifar100/custom/uniform/mag_uni/10/999"], "EA-DST $\\lambda$=20": ["./data/logs/cifar100/custom/uniform/mag_uni/20/999"]}' --needles='["selection_effectiveness", "epoch"]' --labels='["epoch", "selection effectiveness [z-score residual]"]' --title='Selection Effectiveness (Blom adjusted best z-score): s=99.9%' --save_to='./data/images/set_1/uniform_cifar100_999_selection_effectiveness.png' --legend_location="upper left" --average='["selection_effectiveness"]' --no-ci --colors='["#2ca02c", "#d62728", "#9467bd", "#8c564b"]'
 python ./make_plots.py --groups='{"DST": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/1/999"], "EA-DST $\\lambda$=5": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/5/999"], "EA-DST $\\lambda$=10": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/10/999"], "EA-DST $\\lambda$=20": ["./data/logs/tiny_imagenet/custom/uniform/mag_uni/20/999"]}' --needles='["selection_effectiveness", "epoch"]' --labels='["epoch", "selection effectiveness [z-score residual]"]' --title='Selection Effectiveness (Blom adjusted best z-score): s=99.9%' --save_to='./data/images/set_1/uniform_tiny_imagenet_999_selection_effectiveness.png' --legend_location="upper left" --average='["selection_effectiveness"]' --no-ci --colors='["#2ca02c", "#d62728", "#9467bd", "#8c564b"]'
-
 
 # set 2
 # erk
