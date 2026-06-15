@@ -123,7 +123,7 @@ def generate_artifacts(data: pandas.DataFrame, layers: int, folder: str) -> None
 
         # Plot inset data
         _, = axins.plot(x, lines[0])
-        line_real, = axins.plot(x, lines[2])
+        line_real, = axins.plot(x, lines[2], linestyle="--")
         axins.fill_between(x, lower, upper, color=line_real.get_color(), alpha=0.2)
 
         # Set limits
