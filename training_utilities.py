@@ -199,6 +199,18 @@ def edge_reachability(model: torch.nn.Module) -> List[Tuple[float, float, float]
 
     return edge_reachabilities
 
+def edge_stats(model: torch.nn.Module) -> List[Tuple[float, float, float]]:
+    modules = [module for module in model.modules() if isinstance(module, src.network.detail.MaskedLayer)]
+    edge_reachabilities = []
+
+    for module in modules:
+        forward_reachability = torch.sum(module.forward_reachability * module.mask != 0).item()
+        backward_reachability = torch.sum(module.backward_reachability * module.mask != 0).item()
+        functional_reachability = torch.sum((module.forward_reachability.to(torch.bool) & module.backward_reachability.to(torch.bool)) * module.mask != 0).item()
+        edge_reachabilities.append((forward_reachability, backward_reachability, functional_reachability, module.active_weights(), module.total_weights()))
+
+    return edge_reachabilities
+
 # instantiates network with all statistics to track
 def spawn_network(model_factory, optimizer_factory, lr_decay_factory, parent: torch.nn.Module, warmup_strategy: src.rules.warmup.Warmup, pruning_strategies: List[src.rules.pruning.Pruning], regrowth_strategies: List[src.rules.regrowth.Regrowth], train_loader: torch.utils.data.Dataset, minibatch_budget: int, device: torch.device, cycles: int, redistribute: bool = False, noise: float = 0.05) -> torch.nn.Module:
     model = model_factory().to(device)
@@ -331,6 +343,14 @@ def generate_log_entry(statistics: Dict, children: List[torch.nn.Module], train_
         "learning_rate": children[0].optimizer.param_groups[0]["lr"],
         "pruned_fraction": children[0].pruned_fraction,
     }
+
+    for child_index, child in enumerate(children):
+        for layer_index, (forward_weights, backward_weights, functional_weights, active_weights, total_weights) in enumerate(edge_stats(child)):
+            log_entry[f"{child_index}_{layer_index}_forward_weights"] = forward_weights
+            log_entry[f"{child_index}_{layer_index}_backward_weights"] = backward_weights
+            log_entry[f"{child_index}_{layer_index}_functional_weights"] = functional_weights
+            log_entry[f"{child_index}_{layer_index}_active_weights"] = active_weights
+            log_entry[f"{child_index}_{layer_index}_total_weights"] = total_weights
 
     # NOTE: this assumes children are already sorted using their fitness!
     children[0].eval()
