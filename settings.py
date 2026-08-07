@@ -1,6 +1,6 @@
 import logger.aggregate_logger
 import logger.stdout_logger
-import logger.file_logger
+import logger.csv_logger
 
 class SingletonMeta(type):
     _instances = {}
@@ -35,6 +35,6 @@ class Settings(metaclass=SingletonMeta):
     @property
     def logger(self):
         if self._logger is None:
-            loggers = [logger.stdout_logger.StdoutLogger()] + ([logger.file_logger.FileLogger(filename=self.log)] if self.log is not None else [])
+            loggers = [logger.stdout_logger.StdoutLogger()] + ([logger.csv_logger.CSVLogger(filename=self.log)] if self.log is not None else [])
             self._logger = logger.aggregate_logger.AggregateLogger(loggers)
         return self._logger

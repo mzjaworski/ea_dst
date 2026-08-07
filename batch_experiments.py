@@ -94,7 +94,7 @@ if __name__ == "__main__":
 
     # generate file ids and names
     file_ids = [i for i in range(args.runs)]
-    file_names = [f"{i}.log" for i in file_ids]
+    file_names = [f"{i}.csv" for i in file_ids]
 
     # assemble object generating per thread ids
     GlobalStorage().thread_id = iter(range(args.workers))
