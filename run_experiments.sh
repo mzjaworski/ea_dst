@@ -68,3 +68,9 @@ find ./data/baselines/set_2/custom/gmag_guni/dst/uniform/999/cifar100 -type f | 
 find ./data/baselines/set_2/custom/gmag_guni/dst/uniform/9975/cifar100 -type f | LC_ALL=C sort | python ./batch_experiments.py --workers=14 --seed=1112732635 --runs=5
 find ./data/baselines/set_2/custom/gmag_guni/dst/uniform/99/cifar100 -type f | LC_ALL=C sort | python ./batch_experiments.py --workers=14 --seed=1325584729 --runs=5
 find ./data/baselines/set_2/custom/gmag_guni/dst/uniform/995/cifar100 -type f | LC_ALL=C sort | python ./batch_experiments.py --workers=14 --seed=1091550534 --runs=5
+
+# resnet34
+find ./data/baselines/set_2/resnet34/zero/dst/gmag_guni -type f | LC_ALL=C sort | python ./batch_experiments.py --workers=7 --seed=2634444911 --runs=5
+find ./data/baselines/set_2/resnet34/zero/dst/mag_grad -type f | LC_ALL=C sort | python ./batch_experiments.py --workers=7 --seed=103818178 --runs=5
+find ./data/baselines/set_2/resnet34/zero/dst/mag_uni -type f | LC_ALL=C sort | python ./batch_experiments.py --workers=7 --seed=1071005823 --runs=5
+find ./data/baselines/set_2/resnet34/zero/dst/static_sparsity -type f | LC_ALL=C sort | python ./batch_experiments.py --workers=7 --seed=2950005666 --runs=5
