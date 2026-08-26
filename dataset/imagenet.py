@@ -148,11 +148,9 @@ class ImageNet(dataset.i_dataset.IDataset):
             indices = train_indices_by_class[class_index]
 
             if self.train_samples_per_class is not None:
-                if len(indices) < self.train_samples_per_class:
-                    raise RuntimeError(f"Requested {self.train_samples_per_class} samples for class {class_index}, but only {len(indices)} are available")
-
+                sample_count = min(self.train_samples_per_class, len(indices))
                 permutation = torch.randperm(len(indices), generator=generator)
-                indices = [indices[i] for i in permutation[:self.train_samples_per_class]]
+                indices = [indices[i] for i in permutation[:sample_count]]
 
             train_indices.extend(indices)
 
