@@ -14,11 +14,12 @@ from torch.utils.data import default_collate
 # LLM generated against supplied template
 class ImageNet(dataset.i_dataset.IDataset):
 
-    def __init__(self, train_batch: int, test_batch: int, resize: Tuple[float, float], train_samples_per_class: int | None = None, seed: int = 0, device: torch.device = torch.device("cpu")):
+    def __init__(self, train_batch: int, test_batch: int, resize: Tuple[float, float], train_samples_per_class: int | None = None, num_classes: int | None = None, seed: int = 0, device: torch.device = torch.device("cpu")):
         self.train_batch = train_batch
         self.test_batch = test_batch
         self.resize = resize
         self.train_samples_per_class = train_samples_per_class
+        self.num_classes = num_classes
         self.seed = seed
         self.device = device
 
@@ -116,31 +117,58 @@ class ImageNet(dataset.i_dataset.IDataset):
         if trainset.class_to_idx != testset.class_to_idx:
             raise RuntimeError("ImageNet training and validation class mappings do not match")
 
-        if self.train_samples_per_class is not None:
-            if self.train_samples_per_class <= 0:
-                raise ValueError("train_samples_per_class must be greater than 0")
+        num_classes = self.num_classes if self.num_classes is not None else 1000
 
-            class_indices = [[] for _ in range(1000)]
+        if num_classes <= 0 or num_classes > 1000:
+            raise ValueError("num_classes must be between 1 and 1000")
 
-            for index, target in enumerate(trainset.targets):
-                class_indices[target].append(index)
+        if self.train_samples_per_class is not None and self.train_samples_per_class <= 0:
+            raise ValueError("train_samples_per_class must be greater than 0")
 
-            generator = torch.Generator().manual_seed(self.seed)
-            selected_indices = []
+        generator = torch.Generator().manual_seed(self.seed)
 
-            for class_index, indices in enumerate(class_indices):
+        if num_classes < 1000:
+            selected_classes = torch.randperm(1000, generator=generator)[:num_classes].tolist()
+        else:
+            selected_classes = list(range(1000))
+
+        selected_classes = sorted(selected_classes)
+        selected_class_set = set(selected_classes)
+        class_remap = {old_class: new_class for new_class, old_class in enumerate(selected_classes)}
+
+        train_indices_by_class = {class_index: [] for class_index in selected_classes}
+
+        for index, target in enumerate(trainset.targets):
+            if target in selected_class_set:
+                train_indices_by_class[target].append(index)
+
+        train_indices = []
+
+        for class_index in selected_classes:
+            indices = train_indices_by_class[class_index]
+
+            if self.train_samples_per_class is not None:
                 if len(indices) < self.train_samples_per_class:
-                    raise RuntimeError(
-                        f"Requested {self.train_samples_per_class} samples for class {class_index}, but only {len(indices)} are available"
-                    )
+                    raise RuntimeError(f"Requested {self.train_samples_per_class} samples for class {class_index}, but only {len(indices)} are available")
 
                 permutation = torch.randperm(len(indices), generator=generator)
-                selected_indices.extend([indices[i] for i in permutation[:self.train_samples_per_class]])
+                indices = [indices[i] for i in permutation[:self.train_samples_per_class]]
 
-            trainset = torch.utils.data.Subset(trainset, selected_indices)
+            train_indices.extend(indices)
 
-        cutmix = torchvision.transforms.v2.CutMix(num_classes=1000, alpha=0.5)
-        mixup = torchvision.transforms.v2.MixUp(num_classes=1000, alpha=0.5)
+        test_indices = [index for index, target in enumerate(testset.targets) if target in selected_class_set]
+
+        trainset.samples = [(path, class_remap[target] if target in selected_class_set else target) for path, target in trainset.samples]
+        trainset.targets = [class_remap[target] if target in selected_class_set else target for target in trainset.targets]
+
+        testset.samples = [(path, class_remap[target] if target in selected_class_set else target) for path, target in testset.samples]
+        testset.targets = [class_remap[target] if target in selected_class_set else target for target in testset.targets]
+
+        trainset = torch.utils.data.Subset(trainset, train_indices)
+        testset = torch.utils.data.Subset(testset, test_indices)
+
+        cutmix = torchvision.transforms.v2.CutMix(num_classes=num_classes, alpha=0.5)
+        mixup = torchvision.transforms.v2.MixUp(num_classes=num_classes, alpha=0.5)
         cutmix_or_mixup = torchvision.transforms.v2.RandomChoice([cutmix, mixup])
 
         def collate_fn(batch):
