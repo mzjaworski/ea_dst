@@ -1,5 +1,4 @@
-This repository contains code and experimental artifacts accompanying the master’s thesis "When Sparsity Breaks Connectivity: Restoring Functional Paths in Neural Networks". 
-The implementation is provided for reproducibility of the results and analysis presented in the thesis.
+This repository contains the code and experimental artifacts supporting the DynaFront paper, "When Sparsity Breaks Connectivity: Functional Reachability and Guided Topology Dynamics in Extreme Sparse Training". The code was originally developed during the master's thesis, "When Sparsity Breaks Connectivity: Restoring Functional Paths in Neural Networks", and is provided to support reproducibility of the results and analyses presented in both works.
 
 This project assumes UNIX compliant operating system.
 1. to setup conda environment run ``./setup.sh``
